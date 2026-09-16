@@ -1,62 +1,133 @@
 import { useEffect, useState } from "react";
-import { Card, Text, Metric, Grid, Flex } from "@tremor/react";
-import { getFunnelSummary, type FunnelSummaryResponse } from "../lib/api";
+import { Card, Text, Title, Grid } from "@tremor/react";
+import {
+  getFinanceSummary,
+  getFunnelSummary,
+  getLocations,
+  type FinanceSummary,
+  type FunnelSummaryResponse,
+  type LocationOption,
+} from "../lib/api";
+import { FilterBar, type Filters } from "../components/FilterBar";
+import { StatCard } from "../components/StatCard";
+import { LenderBarChart } from "../components/LenderBarChart";
 import { FunnelChart } from "../components/FunnelChart";
 
-const STAGE_TITLES: Record<string, string> = {
-  new_patients: "New patients",
-  treatment_presented: "Treatment presented",
-  applications_submitted: "Applications submitted",
-  applications_approved: "Applications approved",
-  funded: "Funded",
-  treatment_completed: "Treatment completed",
-};
+function defaultFilters(): Filters {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  return {
+    dateFrom: from.toISOString().slice(0, 10),
+    dateTo: to.toISOString().slice(0, 10),
+    newPatientsOnly: false,
+  };
+}
 
 export function Dashboard() {
-  const [data, setData] = useState<FunnelSummaryResponse | null>(null);
+  const [filters, setFilters] = useState<Filters>(defaultFilters());
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [finance, setFinance] = useState<FinanceSummary | null>(null);
+  const [funnel, setFunnel] = useState<FunnelSummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getFunnelSummary()
-      .then(setData)
-      .catch((err: Error) => setError(err.message));
+    getLocations().catch(() => undefined).then((locs) => locs && setLocations(locs));
   }, []);
+
+  useEffect(() => {
+    setError(null);
+    Promise.all([
+      getFinanceSummary({
+        locationId: filters.locationId,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        applicationType: filters.applicationType,
+        status: filters.status,
+        // Omit rather than send "false" — z.coerce.boolean() on the backend treats any
+        // non-empty string (including the literal text "false") as true.
+        newPatientsOnly: filters.newPatientsOnly ? true : undefined,
+      }),
+      getFunnelSummary({ locationId: filters.locationId, dateFrom: filters.dateFrom, dateTo: filters.dateTo }),
+    ])
+      .then(([financeData, funnelData]) => {
+        setFinance(financeData);
+        setFunnel(funnelData);
+      })
+      .catch((err: Error) => setError(err.message));
+  }, [filters]);
 
   return (
     <main className="mx-auto max-w-6xl p-6">
-      <Flex justifyContent="between" alignItems="center" className="mb-6">
-        <div>
-          <Text>Dental</Text>
-          <Metric>Patient-to-financing funnel</Metric>
-        </div>
-        {/* TODO: location / provider / date range / lender filters (storyboard step 3) */}
-      </Flex>
+      <Title className="mb-4 text-2xl">Finance Report</Title>
+
+      <FilterBar filters={filters} locations={locations} onChange={setFilters} />
 
       {error && (
         <Card className="mb-6 border-l-4 border-red-500">
-          <Text color="red">Could not load funnel data: {error}</Text>
+          <Text color="red">Could not load report: {error}</Text>
           <Text className="mt-1">
-            Is the backend running (npm run dev in backend/) and migrated (npm run migrate)?
+            Is the backend running (npm run dev in backend/) and migrated + seeded (npm run migrate && npm run seed)?
           </Text>
         </Card>
       )}
 
-      {data && (
+      {finance && (
         <>
           <Grid numItemsSm={2} numItemsLg={3} className="mb-6 gap-4">
-            {data.stages.map((stage) => (
-              <Card key={stage.stage}>
-                <Text>{STAGE_TITLES[stage.stage] ?? stage.stage}</Text>
-                <Metric>{stage.count.toLocaleString()}</Metric>
-              </Card>
-            ))}
+            <StatCard
+              title="New Patients"
+              value={finance.newPatients.current.toLocaleString()}
+              priorLabel={`Prior Period: ${finance.newPatients.prior.toLocaleString()}`}
+              pctChange={finance.newPatients.pctChange}
+            />
+            <StatCard
+              title="# of New Patients Applying"
+              value={finance.newPatientsApplying.current.toLocaleString()}
+              priorLabel={`Prior Period: ${finance.newPatientsApplying.prior.toLocaleString()}`}
+              pctChange={finance.newPatientsApplying.pctChange}
+            />
+            <StatCard
+              title="% of New Patients Applying"
+              value={
+                finance.pctNewPatientsApplying.current !== null
+                  ? `${finance.pctNewPatientsApplying.current.toFixed(2)}%`
+                  : "–"
+              }
+              priorLabel={
+                finance.pctNewPatientsApplying.prior !== null
+                  ? `Prior Period: ${finance.pctNewPatientsApplying.prior.toFixed(2)}%`
+                  : "Prior Period: –"
+              }
+              pctChange={null}
+            />
           </Grid>
 
-          <Card>
-            <Text className="mb-2">Funnel by stage</Text>
-            <FunnelChart stages={data.stages} />
-          </Card>
+          <Grid numItemsLg={2} className="mb-6 gap-4">
+            <Card>
+              <Text className="mb-2 font-medium">Total Applications by Financing Co.</Text>
+              <LenderBarChart
+                data={finance.applicationsByLender.map((d) => ({ lender: d.lender, value: d.count }))}
+                emptyMessage="No financing applications recorded yet. This will populate once financing-application data (manual CSV intake or a lender/Denticon integration) is connected."
+              />
+            </Card>
+            <Card>
+              <Text className="mb-2 font-medium">Approval Rates — Current Period</Text>
+              <LenderBarChart
+                data={finance.approvalRateByLender.map((d) => ({ lender: d.lender, value: d.rate }))}
+                valueFormatter={(v) => `${v}%`}
+                emptyMessage="No decisioned applications yet, so approval rates can't be calculated. This will populate once financing-application data is connected."
+              />
+            </Card>
+          </Grid>
         </>
+      )}
+
+      {funnel && (
+        <Card>
+          <Text className="mb-2 font-medium">Patient-to-Financing Funnel</Text>
+          <FunnelChart stages={funnel.stages} />
+        </Card>
       )}
     </main>
   );

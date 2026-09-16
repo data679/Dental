@@ -9,7 +9,9 @@ export type Lender =
   | "proceed"
   | "covered_care"
   | "eve"
-  | "sunbit";
+  | "sunbit"
+  | "fortiva"
+  | "access";
 
 export type ApplicationType = "primary" | "subprime";
 
@@ -95,4 +97,42 @@ export interface FunnelFilters {
   lender?: Lender;
   dateFrom?: string;
   dateTo?: string;
+}
+
+// Filters for the Finance Report (GET /api/finance/summary), matching the reference
+// report's filter bar: Practice Name, Select Date Range, Prime vs SubPrime, Status
+// Filter, Patient Type.
+export interface FinanceFilters {
+  locationId?: number; // "Practice Name"
+  dateFrom?: string;
+  dateTo?: string;
+  applicationType?: ApplicationType; // "Prime vs SubPrime"
+  status?: ApplicationStatus; // "Status Filter"
+  newPatientsOnly?: boolean; // "Patient Type": All vs New Patients
+}
+
+export interface PeriodStat {
+  current: number;
+  prior: number;
+  pctChange: number | null; // null when prior is 0 (can't compute a % change)
+}
+
+export interface LenderCount {
+  lender: Lender;
+  count: number;
+}
+
+export interface LenderRate {
+  lender: Lender;
+  rate: number; // 0-100
+  count: number; // decisioned applications this rate is based on
+}
+
+export interface FinanceSummary {
+  filters: FinanceFilters;
+  newPatients: PeriodStat;
+  newPatientsApplying: PeriodStat;
+  pctNewPatientsApplying: { current: number | null; prior: number | null };
+  applicationsByLender: LenderCount[];
+  approvalRateByLender: LenderRate[];
 }

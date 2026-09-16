@@ -23,13 +23,16 @@ function buildFilterClause(
     params.push(filters.lender);
     clauses.push(`lender = $${params.length}`);
   }
+  // Dates filter on first_visit_date for patients (matches financeService and what the
+  // seed data actually varies) rather than created_at, which just reflects insert time.
+  const dateColumn = opts.table === "patients" ? "first_visit_date" : "created_at";
   if (filters.dateFrom !== undefined) {
     params.push(filters.dateFrom);
-    clauses.push(`${opts.table}.created_at >= $${params.length}`);
+    clauses.push(`${opts.table}.${dateColumn} >= $${params.length}`);
   }
   if (filters.dateTo !== undefined) {
     params.push(filters.dateTo);
-    clauses.push(`${opts.table}.created_at <= $${params.length}`);
+    clauses.push(`${opts.table}.${dateColumn} <= $${params.length}`);
   }
 
   return {

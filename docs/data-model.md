@@ -38,8 +38,37 @@ score, with down payment).
   Docs: https://developer.planetdds.com/
   Provides: patient demographics, new-patient flag / first-visit data, location, assigned
   provider, treatment plans (procedure code, proposed fee, status).
+  **Status: blocked.** API access is behind an authorization we don't currently hold, so
+  there's no live integration yet (see `syncDenticonPatients` job — it's a stub that no-ops
+  without an API key).
 - **Financing data** — no confirmed API yet. Plan is manual CSV intake into staging tables
-  until a lender/Denticon integration for financing status is available.
+  until a lender/Denticon integration for financing status is available. No example
+  financing data yet either — see "Example data received" below.
+
+## Example data received (MVP seed)
+
+Since live Denticon access is blocked, an example export of a single Denticon **Patient
+Ledger** screen (a test patient) was provided instead, to unblock an MVP. What it actually
+showed, for reference:
+
+- **Patient info**: name, DOB, sex, patient ID (numeric, e.g. `4000157`), provider,
+  hygienist, home office, referral type, referred by/to, first/last/next visit, fee
+  schedule, preferred language, address, a lender badge next to the name (e.g. "CareCredit").
+- **Appointments**: date, time, office, operatory, provider, duration, status.
+- **Recalls**: procedure code, interval, recall date, reason.
+- **Responsible party, insurance** (carrier, group #, deductible/max remaining), **account
+  balances** (current + 30/60/90/120 aging), **contract** remaining amounts (regular/ortho).
+
+What it did **not** show: any treatment-plan record, or financing-application specifics
+(submitted/approved/declined/funded, amounts) beyond that one lender badge. So this example
+maps to the **patient** side of the schema, not the financing funnel side.
+
+Given that, `backend/src/db/seed.ts` loads representative *synthetic* patients (varied
+provider/location/source/first-visit-date, patient-ID numbering styled after the example)
+for the MVP demo. It deliberately does **not** fabricate treatment plans, financing
+applications, fundings, or completions — those funnel stages stay at 0 in the dashboard
+until real (or at least example) financing data is available. No real patient data appears
+anywhere in this repo, in seed data, or in logs — synthetic data only.
 
 ## Open questions (from the storyboard — unresolved)
 
@@ -53,6 +82,9 @@ score, with down payment).
 4. **Denticon integration owner/contact** — API access needs to be requested from someone at
    PlanetDDS/Denticon; not yet identified who.
 5. **Open Dental** — mentioned as a possible secondary PMS to support; not scoped yet.
+6. **Appointments, recalls, insurance, and balances** (all visible on the example Patient
+   Ledger) aren't modeled in the schema yet — out of scope for the funnel MVP, but likely
+   needed if this platform grows beyond the funnel view.
 
 ## Course of action (from storyboard)
 
