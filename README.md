@@ -27,10 +27,12 @@ questions still being nailed down.
 | Auth       | Auth0                                |
 | Hosting    | Render / Railway or AWS (HIPAA-compliant) |
 
-Primary data source is the practice management system (Denticon, via the PlanetDDS API,
-read-only) for patient/provider/location/treatment-plan data. Financing application data
-(submitted/approved/declined/funded, by lender) starts as manual CSV intake into staging
-tables until a direct lender/API integration is worked out.
+Primary data source is the practice management system (Denticon, via the PlanetDDS REST
+API, read-only) for patient/provider/location/treatment-plan data — see
+[docs/denticon-api.md](docs/denticon-api.md) for the integration. Financing application data
+(submitted/approved/declined/funded, by lender) comes from lender CSV exports imported
+through the app — see [docs/financing-intake.md](docs/financing-intake.md) — until a
+direct lender API integration is worked out.
 
 ## Repo layout
 
@@ -51,7 +53,28 @@ npm install
 npm run migrate         # applies SQL migrations in src/db/migrations
 npm run dev              # API on http://localhost:4000
 npm run worker            # BullMQ worker process (separate terminal)
+npm test                  # unit tests (vitest)
 ```
+
+### Denticon sync
+
+```bash
+cd backend
+npm run denticon:check          # verify DENTICON_SUBSCRIPTION_KEY against the live API
+npm run denticon:sync -- --full # queue a backfill (worker must be running)
+curl localhost:4000/api/denticon/status
+```
+
+No key yet? `npm run denticon:mock` serves a synthetic practice group in the real API's
+shapes on http://localhost:4900/denticon (key `mock-key`); example payloads are in
+[docs/samples/denticon](docs/samples/denticon/). See docs/denticon-api.md.
+
+### Financing data (lender CSV imports)
+
+Lender application exports are imported from the dashboard's **Import Financing Data**
+page (or `POST /api/finance/import`). See [docs/financing-intake.md](docs/financing-intake.md);
+a sample export that matches the mock patients is in
+[docs/samples/financing](docs/samples/financing/).
 
 ### Frontend
 
@@ -63,9 +86,12 @@ npm run dev               # http://localhost:5173
 
 ## Status
 
-Early scaffold — schema and API are stubs matching the storyboard's step 1 ("nail the data
-model down"). No live Denticon or lender integration yet. See docs/data-model.md for what's
-still open.
+Early scaffold — schema and API match the storyboard's step 1 ("nail the data model
+down"). The Denticon integration is built and tested against the published API contract
+(client, incremental sync into staging, staging → core processing, funnel stages for
+treatment presented/completed) but runs no-op until a PlanetDDS subscription key is
+issued. The financing half of the funnel is fed by CSV import of lender exports
+(docs/financing-intake.md). See docs/data-model.md for what's still open.
 
 ## Credentials
 

@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "refTypeCode": "WEB",
+      "refTypeDescription": "Website / Online Booking"
+    },
+    {
+      "refTypeCode": "GOOG",
+      "refTypeDescription": "Google Ads"
+    },
+    {
+      "refTypeCode": "SOC",
+      "refTypeDescription": "Social Media"
+    },
+    {
+      "refTypeCode": "PTREF",
+      "refTypeDescription": "Patient Referral"
+    },
+    {
+      "refTypeCode": "INS",
+      "refTypeDescription": "Insurance Directory"
+    },
+    {
+      "refTypeCode": "WALK",
+      "refTypeDescription": "Walk-in"
+    },
+    {
+      "refTypeCode": "ORTHO",
+      "refTypeDescription": "Ortho Referral"
+    },
+    {
+      "refTypeCode": "MAIL",
+      "refTypeDescription": "Direct Mail"
+    }
+  ],
+  "message": "Success",
+  "pageNumber": 1,
+  "pageSize": 50,
+  "pageCount": 8,
+  "totalCount": 8,
+  "totalPages": 1
+}

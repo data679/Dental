@@ -8,7 +8,7 @@ const filtersSchema = z.object({
   locationId: z.coerce.number().optional(),
   providerId: z.coerce.number().optional(),
   lender: z
-    .enum(["hfd", "alphaeon", "cherry", "care_credit", "proceed", "covered_care", "eve", "sunbit"])
+    .enum(["hfd", "alphaeon", "cherry", "care_credit", "proceed", "covered_care", "eve", "sunbit", "fortiva", "access"])
     .optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),

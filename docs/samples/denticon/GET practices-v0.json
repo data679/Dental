@@ -1,0 +1,22 @@
+{
+  "data": {
+    "pgId": 1,
+    "practiceGroupName": "Sample Dental Group",
+    "addressLine1": "100 Main St",
+    "addressLine2": "Suite 200",
+    "city": "West Covina",
+    "state": "CA",
+    "zipCode": "91790",
+    "phone": "555-0100",
+    "email": "office@example.com",
+    "cultureId": "en-US",
+    "createdOn": "2023-02-23T12:00:00Z",
+    "createdBy": "SETUP",
+    "modifiedOn": "2025-07-12T12:00:00Z",
+    "modifiedBy": "SETUP",
+    "contactFirstName": "Sam",
+    "contactLastName": "Admin",
+    "active": true
+  },
+  "message": "Success"
+}

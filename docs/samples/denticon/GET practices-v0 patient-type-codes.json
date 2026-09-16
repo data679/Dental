@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "code": "00",
+      "description": "Standard"
+    },
+    {
+      "code": "01",
+      "description": "New Patient"
+    },
+    {
+      "code": "CH",
+      "description": "Child"
+    },
+    {
+      "code": "OR",
+      "description": "Orthodontic"
+    },
+    {
+      "code": "EM",
+      "description": "Emergency"
+    }
+  ],
+  "message": "Success"
+}

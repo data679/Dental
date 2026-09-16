@@ -48,7 +48,7 @@ export function Dashboard() {
         // non-empty string (including the literal text "false") as true.
         newPatientsOnly: filters.newPatientsOnly ? true : undefined,
       }),
-      getFunnelSummary({ locationId: filters.locationId, dateFrom: filters.dateFrom, dateTo: filters.dateTo }),
+      getFunnelSummary({ locationId: filters.locationId, dateFrom: filters.dateFrom, dateTo: filters.dateTo, lender: filters.lender }),
     ])
       .then(([financeData, funnelData]) => {
         setFinance(financeData);
@@ -126,6 +126,11 @@ export function Dashboard() {
       {funnel && (
         <Card>
           <Text className="mb-2 font-medium">Patient-to-Financing Funnel</Text>
+          <Text className="mb-3 text-xs text-gray-500">
+            Patient stages count patients by first visit / plan presented / treatment finished in the
+            range; financing stages count applications submitted in the range and how many of those
+            were approved and funded. The lender filter applies to the financing stages.
+          </Text>
           <FunnelChart stages={funnel.stages} />
         </Card>
       )}

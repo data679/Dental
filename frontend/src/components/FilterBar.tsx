@@ -1,4 +1,4 @@
-import type { ApplicationStatus, ApplicationType, LocationOption } from "../lib/api";
+import type { ApplicationStatus, ApplicationType, Lender, LocationOption } from "../lib/api";
 
 export interface Filters {
   locationId?: number;
@@ -6,8 +6,22 @@ export interface Filters {
   dateTo: string;
   applicationType?: ApplicationType;
   status?: ApplicationStatus;
+  lender?: Lender;
   newPatientsOnly: boolean;
 }
+
+const LENDERS: Array<{ value: Lender; label: string }> = [
+  { value: "care_credit", label: "CareCredit" },
+  { value: "alphaeon", label: "Alphaeon" },
+  { value: "cherry", label: "Cherry" },
+  { value: "proceed", label: "Proceed" },
+  { value: "sunbit", label: "Sunbit" },
+  { value: "hfd", label: "HFD" },
+  { value: "covered_care", label: "Covered Care" },
+  { value: "eve", label: "Eve" },
+  { value: "fortiva", label: "Fortiva" },
+  { value: "access", label: "Access" },
+];
 
 interface FilterBarProps {
   filters: Filters;
@@ -20,7 +34,7 @@ const selectClass =
 
 export function FilterBar({ filters, locations, onChange }: FilterBarProps) {
   return (
-    <div className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4 sm:grid-cols-3 lg:grid-cols-6">
       <div>
         <label className="mb-1 block text-xs font-medium text-gray-500">Practice Name</label>
         <select
@@ -90,6 +104,22 @@ export function FilterBar({ filters, locations, onChange }: FilterBarProps) {
           <option value="pending">Pending</option>
           <option value="approved">Approved</option>
           <option value="declined">Declined</option>
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs font-medium text-gray-500">Lender</label>
+        <select
+          className={`${selectClass} w-full`}
+          value={filters.lender ?? ""}
+          onChange={(e) => onChange({ ...filters, lender: (e.target.value || undefined) as Lender | undefined })}
+        >
+          <option value="">All</option>
+          {LENDERS.map((l) => (
+            <option key={l.value} value={l.value}>
+              {l.label}
+            </option>
+          ))}
         </select>
       </div>
 

@@ -1,0 +1,142 @@
+{
+  "data": [
+    {
+      "code": "D0120",
+      "description": "Periodic oral evaluation",
+      "productionTypeId": 4,
+      "isActive": true
+    },
+    {
+      "code": "D0150",
+      "description": "Comprehensive oral evaluation - new patient",
+      "productionTypeId": 4,
+      "isActive": true
+    },
+    {
+      "code": "D0210",
+      "description": "Intraoral complete series of radiographic images",
+      "productionTypeId": 4,
+      "isActive": true
+    },
+    {
+      "code": "D0274",
+      "description": "Bitewings - four radiographic images",
+      "productionTypeId": 4,
+      "isActive": true
+    },
+    {
+      "code": "D1110",
+      "description": "Prophylaxis - adult",
+      "productionTypeId": 1,
+      "isActive": true
+    },
+    {
+      "code": "D1120",
+      "description": "Prophylaxis - child",
+      "productionTypeId": 1,
+      "isActive": true
+    },
+    {
+      "code": "D1206",
+      "description": "Topical application of fluoride varnish",
+      "productionTypeId": 1,
+      "isActive": true
+    },
+    {
+      "code": "D2140",
+      "description": "Amalgam - one surface, primary or permanent",
+      "productionTypeId": 2,
+      "isActive": true
+    },
+    {
+      "code": "D2391",
+      "description": "Resin-based composite - one surface, posterior",
+      "productionTypeId": 2,
+      "isActive": true
+    },
+    {
+      "code": "D2392",
+      "description": "Resin-based composite - two surfaces, posterior",
+      "productionTypeId": 2,
+      "isActive": true
+    },
+    {
+      "code": "D2740",
+      "description": "Crown - porcelain/ceramic",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D2750",
+      "description": "Crown - porcelain fused to high noble metal",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D2950",
+      "description": "Core buildup, including any pins when required",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D3330",
+      "description": "Endodontic therapy, molar tooth",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D4341",
+      "description": "Periodontal scaling and root planing - four or more teeth per quadrant",
+      "productionTypeId": 1,
+      "isActive": true
+    },
+    {
+      "code": "D4910",
+      "description": "Periodontal maintenance",
+      "productionTypeId": 1,
+      "isActive": true
+    },
+    {
+      "code": "D6010",
+      "description": "Surgical placement of implant body: endosteal implant",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D6058",
+      "description": "Abutment supported porcelain/ceramic crown",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D7140",
+      "description": "Extraction, erupted tooth or exposed root",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D7210",
+      "description": "Extraction, erupted tooth requiring removal of bone",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D8090",
+      "description": "Comprehensive orthodontic treatment of the adult dentition",
+      "productionTypeId": 3,
+      "isActive": true
+    },
+    {
+      "code": "D9110",
+      "description": "Palliative treatment of dental pain",
+      "productionTypeId": 4,
+      "isActive": true
+    }
+  ],
+  "message": "Success",
+  "pageNumber": 1,
+  "pageSize": 50,
+  "pageCount": 22,
+  "totalCount": 22,
+  "totalPages": 1
+}

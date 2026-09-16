@@ -43,8 +43,20 @@ async function seed() {
     // Dev-only reset, in dependency order.
     await client.query(`
       TRUNCATE treatment_completions, fundings, financing_applications, treatment_plans,
-        patients, providers, locations RESTART IDENTITY CASCADE;
+        patients, providers, locations,
+        staging_denticon_patients, staging_denticon_treatment_plans, denticon_sync_state
+        RESTART IDENTITY CASCADE;
     `);
+
+    // `npm run seed -- --reset-only`: wipe and stop, e.g. before syncing from the Denticon
+    // mock (`npm run denticon:mock`) so its offices don't sit next to the synthetic ones.
+    if (process.argv.includes("--reset-only")) {
+      await client.query("COMMIT");
+      console.log("[seed] tables reset, no rows inserted (--reset-only)");
+      client.release();
+      await pool.end();
+      return;
+    }
 
     const locationIds = new Map<string, number>();
     for (const name of LOCATIONS) {
@@ -89,10 +101,10 @@ async function seed() {
     await client.query("ROLLBACK");
     throw err;
   } finally {
-    client.release();
+    if (!pool.ended) client.release();
   }
 
-  await pool.end();
+  if (!pool.ended) await pool.end();
 }
 
 seed().catch((err) => {

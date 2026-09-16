@@ -38,12 +38,18 @@ score, with down payment).
   Docs: https://developer.planetdds.com/
   Provides: patient demographics, new-patient flag / first-visit data, location, assigned
   provider, treatment plans (procedure code, proposed fee, status).
-  **Status: blocked.** API access is behind an authorization we don't currently hold, so
-  there's no live integration yet (see `syncDenticonPatients` job — it's a stub that no-ops
-  without an API key).
-- **Financing data** — no confirmed API yet. Plan is manual CSV intake into staging tables
-  until a lender/Denticon integration for financing status is available. No example
-  financing data yet either — see "Example data received" below.
+  **Status: integration built, credentials pending.** The client, incremental sync and
+  staging → core processing are implemented against the published OpenAPI contract (see
+  [denticon-api.md](denticon-api.md)); the `syncDenticon` job no-ops until
+  `DENTICON_SUBSCRIPTION_KEY` is set. Confirmed available from the API: patient office,
+  preferred provider, referral type (source), first/last visit dates, created date,
+  patient type code; treatment plans at procedure level with status, fees, proposed /
+  accepted / finish dates and completion flags.
+- **Financing data** — Denticon has none, and no lender API is connected. Built as CSV
+  intake of lender exports with header aliasing, patient matching by chart no / name + DOB,
+  and idempotent upserts: see [financing-intake.md](financing-intake.md). A synthetic sample
+  export lives in `docs/samples/financing/`; real lender files are still needed to confirm
+  columns and the prime/subprime split.
 
 ## Example data received (MVP seed)
 
@@ -78,7 +84,9 @@ anywhere in this repo, in seed data, or in logs — synthetic data only.
    submitted/pending/approved/declined, but flags that "in review" or "expired" might also be
    needed. Affects the `financing_applications.status` enum below.
 3. **What fields are actually required per record?** The entity list above is a first pass
-   from the storyboard, not confirmed against real Denticon field availability.
+   from the storyboard. Denticon field availability is now known (see
+   [denticon-api.md](denticon-api.md)) — what's still unconfirmed is which of them the
+   report actually needs.
 4. **Denticon integration owner/contact** — API access needs to be requested from someone at
    PlanetDDS/Denticon; not yet identified who.
 5. **Open Dental** — mentioned as a possible secondary PMS to support; not scoped yet.

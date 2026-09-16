@@ -81,16 +81,16 @@ async function periodStat(
   return { current: currentCount, prior: priorCount, pctChange: pctChange(currentCount, priorCount) };
 }
 
-// Empty until financing_applications has real rows — see docs/data-model.md. Returns []
-// rather than a zero-filled row per lender, so the UI can show an honest "no data yet"
-// state instead of a chart full of zero-height bars.
+// Applications come from the lender CSV intake (docs/financing-intake.md). Returns []
+// rather than a zero-filled row per lender when there's nothing in range, so the UI can
+// show an honest "no data yet" state instead of a chart full of zero-height bars.
 async function applicationsByLender(range: Range, filters: FinanceFilters): Promise<LenderCount[]> {
   const clauses = ["fa.submitted_date >= $1", "fa.submitted_date <= $2"];
   const params: unknown[] = [range.from, range.to];
 
   if (filters.locationId !== undefined) {
     params.push(filters.locationId);
-    clauses.push(`p.location_id = $${params.length}`);
+    clauses.push(`COALESCE(fa.location_id, p.location_id) = $${params.length}`);
   }
   if (filters.applicationType !== undefined) {
     params.push(filters.applicationType);
@@ -100,11 +100,14 @@ async function applicationsByLender(range: Range, filters: FinanceFilters): Prom
     params.push(filters.status);
     clauses.push(`fa.status = $${params.length}`);
   }
+  if (filters.newPatientsOnly) {
+    clauses.push("p.new_patient_flag = true");
+  }
 
   const { rows } = await pool.query<{ lender: LenderCount["lender"]; count: string }>(
     `SELECT fa.lender, count(*)::text AS count
      FROM financing_applications fa
-     JOIN patients p ON p.id = fa.patient_id
+     LEFT JOIN patients p ON p.id = fa.patient_id
      WHERE ${clauses.join(" AND ")}
      GROUP BY fa.lender
      ORDER BY count(*) DESC`,
@@ -113,7 +116,7 @@ async function applicationsByLender(range: Range, filters: FinanceFilters): Prom
   return rows.map((r) => ({ lender: r.lender, count: Number(r.count) }));
 }
 
-// Same emptiness caveat as applicationsByLender.
+// Same emptiness caveat as applicationsByLender. Rate = approved / decisioned (approved + declined).
 async function approvalRateByLender(range: Range, filters: FinanceFilters): Promise<LenderRate[]> {
   const clauses = [
     "fa.decision_date >= $1",
@@ -124,11 +127,14 @@ async function approvalRateByLender(range: Range, filters: FinanceFilters): Prom
 
   if (filters.locationId !== undefined) {
     params.push(filters.locationId);
-    clauses.push(`p.location_id = $${params.length}`);
+    clauses.push(`COALESCE(fa.location_id, p.location_id) = $${params.length}`);
   }
   if (filters.applicationType !== undefined) {
     params.push(filters.applicationType);
     clauses.push(`fa.application_type = $${params.length}`);
+  }
+  if (filters.newPatientsOnly) {
+    clauses.push("p.new_patient_flag = true");
   }
 
   const { rows } = await pool.query<{ lender: LenderRate["lender"]; approved: string; total: string }>(
@@ -136,7 +142,7 @@ async function approvalRateByLender(range: Range, filters: FinanceFilters): Prom
             count(*) FILTER (WHERE fa.status = 'approved')::text AS approved,
             count(*)::text AS total
      FROM financing_applications fa
-     JOIN patients p ON p.id = fa.patient_id
+     LEFT JOIN patients p ON p.id = fa.patient_id
      WHERE ${clauses.join(" AND ")}
      GROUP BY fa.lender`,
     params,
