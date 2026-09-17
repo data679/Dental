@@ -54,6 +54,7 @@ npm run migrate         # applies SQL migrations in src/db/migrations
 npm run dev              # API on http://localhost:4000
 npm run worker            # BullMQ worker process (separate terminal)
 npm test                  # unit tests (vitest)
+npm run test:db           # + database-backed tests, in a throwaway schema
 ```
 
 ### Denticon sync
@@ -83,6 +84,22 @@ cd frontend
 npm install
 npm run dev               # http://localhost:5173
 ```
+
+## Demo on GitHub Pages
+
+A backend-free build of the dashboard is deployed by
+[.github/workflows/pages.yml](.github/workflows/pages.yml) on every push to `main`. It
+computes the same summaries in the browser from a committed snapshot of the **synthetic**
+demo data (`frontend/public/data/snapshot.json`), with all filters live; importing is
+disabled there. Refresh the snapshot with:
+
+```bash
+cd backend && npm run snapshot && npm run snapshot:verify   # API must be running
+```
+
+`snapshot:verify` diffs the browser-side math against the live API. One-time repo setup:
+*Settings → Pages → Source: GitHub Actions*. The snapshot script refuses to export from a
+real Denticon tenant unless told to, and never includes names, DOBs or contact details.
 
 ## Status
 

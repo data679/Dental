@@ -2,8 +2,10 @@ import { pool } from "../db/pool.js";
 import type {
   FinanceFilters,
   FinanceSummary,
+  Lender,
   LenderCount,
   LenderRate,
+  MultiLenderSummary,
   PeriodStat,
 } from "../types/domain.js";
 
@@ -154,15 +156,84 @@ async function approvalRateByLender(range: Range, filters: FinanceFilters): Prom
   }));
 }
 
+// Multi-lender ("multi-app") view: cases opened in the range, how many lenders each went
+// to, and — when a patient had more than one approval to choose from — which lender won.
+// "offered" = multi-approved cases where this lender approved; "chosen" = of those, the
+// ones funded through this lender. Win rate = chosen / offered.
+async function multiLenderSummary(range: Range, filters: FinanceFilters): Promise<MultiLenderSummary> {
+  const clauses = ["cs.opened_date >= $1", "cs.opened_date <= $2"];
+  const params: unknown[] = [range.from, range.to];
+  if (filters.locationId !== undefined) {
+    params.push(filters.locationId);
+    clauses.push(`cs.location_id = $${params.length}`);
+  }
+  if (filters.newPatientsOnly) {
+    clauses.push("EXISTS (SELECT 1 FROM patients p WHERE p.id = cs.patient_id AND p.new_patient_flag)");
+  }
+  const where = `WHERE ${clauses.join(" AND ")}`;
+
+  const { rows: [t] } = await pool.query<{
+    cases: string; multi: string; lenders: string; approved: string; multi_approved: string; funded: string;
+    funded_from_multi: string; soft: string; hard: string; unknown: string;
+  }>(
+    `SELECT count(*)::text AS cases,
+            count(*) FILTER (WHERE cs.lenders > 1)::text AS multi,
+            coalesce(sum(cs.lenders), 0)::text AS lenders,
+            count(*) FILTER (WHERE cs.approvals > 0)::text AS approved,
+            count(*) FILTER (WHERE cs.approvals > 1)::text AS multi_approved,
+            count(*) FILTER (WHERE cs.funded)::text AS funded,
+            count(*) FILTER (WHERE cs.funded AND cs.approvals > 1)::text AS funded_from_multi,
+            (SELECT count(*) FROM financing_applications fa JOIN financing_case_summary c2 ON c2.case_id = fa.case_id
+              WHERE fa.inquiry_type = 'soft' AND c2.case_id IN (SELECT case_id FROM financing_case_summary cs ${where}))::text AS soft,
+            (SELECT count(*) FROM financing_applications fa JOIN financing_case_summary c2 ON c2.case_id = fa.case_id
+              WHERE fa.inquiry_type = 'hard' AND c2.case_id IN (SELECT case_id FROM financing_case_summary cs ${where}))::text AS hard,
+            (SELECT count(*) FROM financing_applications fa JOIN financing_case_summary c2 ON c2.case_id = fa.case_id
+              WHERE fa.inquiry_type IS NULL AND c2.case_id IN (SELECT case_id FROM financing_case_summary cs ${where}))::text AS unknown
+       FROM financing_case_summary cs ${where}`,
+    params,
+  );
+
+  const { rows: wins } = await pool.query<{ lender: Lender; offered: string; chosen: string }>(
+    `SELECT fa.lender,
+            count(DISTINCT cs.case_id)::text AS offered,
+            count(DISTINCT cs.case_id) FILTER (WHERE cs.chosen_lender = fa.lender)::text AS chosen
+       FROM financing_case_summary cs
+       JOIN financing_applications fa ON fa.case_id = cs.case_id AND fa.status = 'approved'
+      ${where} AND cs.approvals > 1
+      GROUP BY fa.lender
+      ORDER BY count(DISTINCT cs.case_id) DESC, fa.lender::text`,
+    params,
+  );
+
+  const cases = Number(t?.cases ?? 0);
+  return {
+    cases,
+    multiLenderCases: Number(t?.multi ?? 0),
+    avgLendersPerCase: cases ? Number((Number(t?.lenders ?? 0) / cases).toFixed(2)) : null,
+    casesApproved: Number(t?.approved ?? 0),
+    casesWithMultipleApprovals: Number(t?.multi_approved ?? 0),
+    casesFunded: Number(t?.funded ?? 0),
+    casesFundedFromMultipleApprovals: Number(t?.funded_from_multi ?? 0),
+    inquiries: { soft: Number(t?.soft ?? 0), hard: Number(t?.hard ?? 0), unknown: Number(t?.unknown ?? 0) },
+    chosenLenderWhenMultiApproved: wins.map((w) => ({
+      lender: w.lender,
+      offered: Number(w.offered),
+      chosen: Number(w.chosen),
+      winRate: Number(w.offered) ? Number(((Number(w.chosen) / Number(w.offered)) * 100).toFixed(1)) : null,
+    })),
+  };
+}
+
 export async function getFinanceSummary(filters: FinanceFilters): Promise<FinanceSummary> {
   const current = resolveDateRange(filters);
   const prior = priorPeriod(current.from, current.to);
 
-  const [newPatients, newPatientsApplying, appsByLender, approvalByLender] = await Promise.all([
+  const [newPatients, newPatientsApplying, appsByLender, approvalByLender, multiLender] = await Promise.all([
     periodStat(current, prior, filters, false),
     periodStat(current, prior, filters, true),
     applicationsByLender(current, filters),
     approvalRateByLender(current, filters),
+    multiLenderSummary(current, filters),
   ]);
 
   return {
@@ -175,6 +246,7 @@ export async function getFinanceSummary(filters: FinanceFilters): Promise<Financ
     },
     applicationsByLender: appsByLender,
     approvalRateByLender: approvalByLender,
+    multiLender,
   };
 }
 

@@ -57,6 +57,91 @@ retried automatically after every Denticon sync (`rematchUnmatchedApplications`)
 *Retry matching* / `POST /api/finance/rematch`. The Denticon sync populates
 `patients.first_name/last_name/birth_date/chart_no` for this purpose.
 
+## Validation, duplicates and warnings
+
+Every row ends up in exactly one bucket, and the import result / history says which:
+
+| Outcome | Meaning | Examples |
+|---|---|---|
+| **rejected** | not usable; nothing written for this row, the rest of the file still imports | unknown lender or status, unparseable date, amount that isn't a number or is ≥ $10M (would overflow the column), negative amount, no identifier at all (no id, chart no, or name) |
+| **duplicate** | same application appears earlier in the *same* file — first occurrence kept | same application id twice; same lender + patient + date twice when there's no id |
+| **updated** | the application was already on file from an earlier import and was refreshed | re-uploading last month's export with new statuses |
+| **inserted** | new application | |
+
+On top of that, a row can carry **warnings** — it was imported, but something looks off:
+contradictory status (declined but a funded amount ⇒ treated as funded), decision or
+funded date before the submitted date, dates in the future, funded > approved, unknown
+prime/subprime value (defaulted for the lender), impossible DOB (ignored for matching),
+day-first dates that were auto-detected (31/12/2025), a blank submitted date (another date
+is used, or the row is flagged as invisible to date filters), and **possible duplicates
+across files** — same patient, lender and submitted date under a different reference id
+(imported, but `possible_duplicate_of` is set and it's listed in the data-quality report).
+
+File-level **notes** say once what the whole file lacks (no DOB column, no amount column,
+no application id, no location…) instead of repeating it per row. Repeated header names
+are kept apart as `Amount`, `Amount (2)`.
+
+### Data-quality report
+
+`GET /api/data-quality` (shown on the Import page) runs a fixed set of SQL checks over
+the whole warehouse and lists counts + examples: possible duplicate patient charts (same
+name + DOB, different Denticon ids), possible duplicate applications, duplicate location
+names, unlinked applications, applications with no submitted date, approved with no
+amount, funded > approved, decided before submitted, patients missing location/provider/
+first visit, plans missing fee/date, and Denticon staging rows still waiting. Adding a
+check is one entry in `backend/src/routes/dataQuality.ts`.
+
+### Tests
+
+`npm test` covers the parser, header mapping, and every normaliser rule above with
+hostile inputs. `npm run test:db` additionally runs the import service, matching, funnel
+queries and the Denticon sync job against a throwaway schema (`dental_test`) inside the
+dev database — duplicates within and across files, accent/punctuation-insensitive
+matching, ambiguous charts, one-bad-row-doesn't-sink-the-file, rematch after a sync, a
+3,000-row file, a forbidden office, and id-less upstream records.
+
+## Multi-lender applications ("multi-app") and cases
+
+The practice often shops one treatment to several lenders at once: a soft check at two or
+three lenders the same day, then the patient picks one of the approvals to use. Counting
+application rows makes that look like waste (3 submitted, 2 approved, 1 funded = "two
+approvals lost"), so the funnel counts **cases** instead.
+
+**A case** = one patient's round of applications for one treatment. Rows join a case when:
+
+1. the export carries a request/multi-app id (`case_id` column; aliases: "Request ID",
+   "Multi-App ID", "Prequal ID"…) — rows with the same id are one case, whatever the dates; else
+2. the same patient (or, while unmatched, the same applicant name + DOB) submitted within
+   **`FINANCING_CASE_WINDOW_DAYS`** (default 14) of the case's opened date; else
+3. a new case is opened.
+
+A case's outcome is derived, never stored (`financing_case_summary` view):
+`funded` if any application funded → `approved` if any approved → `pending` → `declined`
+only if *all* declined → else `submitted`. `chosen_lender` is the funded one.
+
+**Soft vs hard**: `inquiry_type` per application from an "Inquiry Type"/"Soft Pull"
+column, or inferred from wording ("Prequalified", "Pre-approved", "Pre-declined" ⇒ soft).
+
+What this changes:
+- **Funnel**: *Financing requested → Approved by a lender → Funded* count cases opened in
+  the range. The response also carries `financing: { cases, applications,
+  multiLenderCases, avgLendersPerCase }` so the raw row count is never hidden.
+- **Lender charts** (applications by lender, approval rate) still count every
+  application — each lender did decide on its own application.
+- **New multi-lender block** (`multiLender` in `/api/finance/summary`, card on the
+  dashboard): share of cases that went to 2+ lenders, cases where the patient had a
+  choice (2+ approvals), and *win rate* — among cases with several approvals, how often
+  each approving lender was the one the patient used.
+- `GET /api/finance/cases` lists cases with their applications for review;
+  `POST /api/finance/cases/rebuild` regroups everything (run after changing the window
+  or when upgrading a database that predates cases). Matching an application to a patient
+  later automatically moves it into that patient's case.
+- Data quality adds "cases funded through more than one lender" (window too wide, or two
+  treatments) and "applications not grouped into a case".
+
+Assumptions to confirm with real files: the 14-day window (a second treatment within two
+weeks would be merged), and whether portals export a request id at all.
+
 ## Where it lands
 
 `staging_financing_csv` (every row, raw + normalised + outcome, keyed to a

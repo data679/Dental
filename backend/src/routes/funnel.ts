@@ -19,7 +19,7 @@ funnelRouter.get("/summary", async (req, res, next) => {
   try {
     const filters = filtersSchema.parse(req.query);
     const summary = await getFunnelSummary(filters);
-    res.json({ filters, stages: summary });
+    res.json({ filters, ...summary });
   } catch (err) {
     next(err);
   }

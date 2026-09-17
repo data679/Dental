@@ -121,6 +121,92 @@ describe("normalizeRow", () => {
     expect(!noIdentity.ok && noIdentity.error.message).toMatch(/identify/);
 
     const badDate = normalizeRow(row({ Lender: "Cherry", Status: "Approved", "Last Name": "Doe", "Application Date": "13/45/2026" }), headers, map, 6);
-    expect(!badDate.ok && badDate.error.message).toMatch(/invalid date/);
+    expect(!badDate.ok && badDate.error.message).toMatch(/invalid submitted_date/);
+  });
+});
+
+describe("edge cases", () => {
+  const H = ["Lender", "Status", "Application Date", "Approved Amount", "Funded Amount", "Type", "Last Name", "First Name", "DOB"];
+  const M = mapHeaders(H);
+  const run = (over: Partial<Record<(typeof H)[number], string>>, today = "2026-09-17") =>
+    normalizeRow(H.map((h) => over[h] ?? ""), H, M, 1, { today });
+  const base = { Lender: "Cherry", Status: "Approved", "Application Date": "9/1/2026", "Last Name": "Doe", DOB: "1/1/1990" };
+
+  it("keeps both columns when a header name repeats", () => {
+    const headers = ["Lender", "Status", "Amount", "Amount", "Last Name"];
+    const m = mapHeaders(headers);
+    expect(Object.keys(m.byHeader)).toEqual(["Lender", "Status", "Amount", "Amount (2)", "Last Name"]);
+    expect(m.byHeader["Amount"]).toBe("funded_amount");
+    expect(m.byHeader["Amount (2)"]).toBeNull();
+    const r = normalizeRow(["Cherry", "Approved", "100", "200", "Doe"], headers, m, 1);
+    expect(r.raw).toEqual({ Lender: "Cherry", Status: "Approved", Amount: "100", "Amount (2)": "200", "Last Name": "Doe" });
+  });
+
+  it("reads an unambiguous day-first date and says so; rejects an impossible one", () => {
+    const r = run({ ...base, "Application Date": "31/12/2025" });
+    expect(r.ok && r.record.submittedDate).toBe("2025-12-31");
+    expect(r.warnings.map((w) => w.message)).toContainEqual(expect.stringMatching(/read as day-first/));
+    expect(normalizeDate("13/45/2026")).toBe("invalid");
+    expect(normalizeDate("1/2/2026")).toBe("2026-01-02"); // ambiguous → US
+  });
+
+  it("rejects amounts that would overflow the database, and negatives", () => {
+    expect(run({ ...base, "Approved Amount": "99999999999999" })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/over \$10,000,000/) } });
+    expect(run({ ...base, "Approved Amount": "(500)" })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/negative/) } });
+    expect(run({ ...base, "Approved Amount": "$9,999,999.99" }).ok).toBe(true);
+  });
+
+  it("defaults an unknown tier with a warning instead of rejecting the row", () => {
+    const r = run({ ...base, Type: "Standard" });
+    expect(r.ok && r.record.applicationType).toBe("primary");
+    expect(r.warnings[0]!.message).toMatch(/unknown application type "Standard" — defaulted to primary/);
+  });
+
+  it("drops an impossible DOB from matching but keeps the row", () => {
+    const future = run({ ...base, DOB: "1/1/2090" });
+    expect(future.ok && future.record.patientDob).toBeNull();
+    expect(future.warnings.map((w) => w.message)).toContainEqual(expect.stringMatching(/in the future/));
+    const ancient = run({ ...base, DOB: "1/1/1850" });
+    expect(ancient.ok && ancient.record.patientDob).toBeNull();
+    expect(ancient.warnings.map((w) => w.message)).toContainEqual(expect.stringMatching(/over 120 years/));
+  });
+
+  it("warns on future dates and on funded > approved, and flips declined+funded to funded", () => {
+    const r = run({ ...base, "Application Date": "12/25/2026", "Approved Amount": "100", "Funded Amount": "500", Status: "Declined" });
+    expect(r.ok && r.record.status).toBe("approved");
+    const msgs = r.warnings.map((w) => w.message);
+    expect(msgs).toContainEqual(expect.stringMatching(/submitted date 2026-12-25 is in the future/));
+    expect(msgs).toContainEqual(expect.stringMatching(/exceeds approved/));
+    expect(msgs).toContainEqual(expect.stringMatching(/status "Declined" but a funded amount/));
+  });
+
+  it("uses another date when submitted is blank, and says when there are none", () => {
+    const H2 = ["Lender", "Status", "Decision Date", "Last Name", "DOB"];
+    const M2 = mapHeaders(H2);
+    const withDecision = normalizeRow(["Cherry", "Approved", "9/3/2026", "Doe", "1/1/1990"], H2, M2, 1);
+    expect(withDecision.ok && withDecision.record.submittedDate).toBe("2026-09-03");
+    expect(withDecision.warnings[0]!.message).toMatch(/no submitted date — using the earliest other date/);
+    const none = normalizeRow(["Cherry", "Approved", "", "Doe", "1/1/1990"], H2, M2, 2);
+    expect(none.ok && none.record.submittedDate).toBeNull();
+    expect(none.warnings[0]!.message).toMatch(/no dates at all/);
+  });
+
+  it("only nags about missing per-row identifiers/amounts when the file has those columns", () => {
+    const noCols = mapHeaders(["Lender", "Status", "Last Name"]);
+    const r = normalizeRow(["Cherry", "Approved", "Doe"], ["Lender", "Status", "Last Name"], noCols, 1);
+    expect(r.ok).toBe(true);
+    expect(r.warnings).toEqual([]);
+    const withCols = run({ ...base, DOB: "", "Approved Amount": "" });
+    expect(withCols.warnings.map((w) => w.message)).toEqual([
+      expect.stringMatching(/approved with no approved amount/),
+      expect.stringMatching(/matching by name only/),
+    ]);
+  });
+
+  it("builds the same dedupe key regardless of name punctuation, case or accents", () => {
+    const a = run({ ...base, "Last Name": "Muñoz-O'Brien", "First Name": "José" });
+    const b = run({ ...base, "Last Name": "MUNOZ OBRIEN", "First Name": "jose" });
+    expect(a.ok && b.ok && a.record.dedupeKey).toBe(b.ok && b.record.dedupeKey);
+    expect(a.ok && a.record.dedupeKey).toBe("cherry:munozobrien|jose|1990-01-01:2026-09-01");
   });
 });

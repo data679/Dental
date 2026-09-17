@@ -54,19 +54,37 @@ export async function syncDenticon(job: Job<SyncDenticonPayload>): Promise<SyncD
 
   let patientsLanded = 0;
   let treatmentPlansLanded = 0;
+  const failures: Array<{ officeId: number; error: string }> = [];
   for (const officeId of offices) {
-    patientsLanded += await syncPatientsForOffice(client, {
-      officeId,
-      backfillDays: env.DENTICON_BACKFILL_DAYS,
-      full,
-    });
-    treatmentPlansLanded += await syncTreatmentPlansForOffice(client, {
-      officeId,
-      backfillDays: env.DENTICON_BACKFILL_DAYS,
-      full,
-    });
+    // One office failing (403 out of scope, transient 5xx after retries) must not stop the
+    // others; its error is recorded in denticon_sync_state and re-raised at the end.
+    try {
+      patientsLanded += await syncPatientsForOffice(client, {
+        officeId,
+        backfillDays: env.DENTICON_BACKFILL_DAYS,
+        full,
+      });
+      treatmentPlansLanded += await syncTreatmentPlansForOffice(client, {
+        officeId,
+        backfillDays: env.DENTICON_BACKFILL_DAYS,
+        full,
+      });
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      console.error(`[denticon] office ${officeId} failed: ${message}`);
+      failures.push({ officeId, error: message });
+    }
   }
 
+  // Whatever did land gets promoted, even if some offices failed.
   const processed = data.skipProcessing ? null : await processDenticonStaging(ref);
+
+  if (failures.length) {
+    throw new Error(
+      `Denticon sync: ${failures.length}/${offices.length} office(s) failed — ` +
+        failures.map((f) => `${f.officeId}: ${f.error}`).join("; ") +
+        ` (other offices synced: ${patientsLanded} patients, ${treatmentPlansLanded} plans)`,
+    );
+  }
   return { offices, patientsLanded, treatmentPlansLanded, processed };
 }

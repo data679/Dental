@@ -25,6 +25,8 @@ export const CANONICAL_COLUMNS = [
   "patient_first_name",
   "patient_last_name",
   "patient_dob",
+  "case_id",
+  "inquiry_type",
 ] as const;
 export type CanonicalColumn = (typeof CANONICAL_COLUMNS)[number];
 
@@ -47,6 +49,8 @@ const HEADER_ALIASES: Record<CanonicalColumn, string[]> = {
   patient_first_name: ["patient_first_name", "first_name", "firstname", "first", "applicant_first_name", "customer_first_name", "given_name"],
   patient_last_name: ["patient_last_name", "last_name", "lastname", "last", "surname", "applicant_last_name", "customer_last_name", "family_name"],
   patient_dob: ["patient_dob", "dob", "date_of_birth", "birth_date", "birthdate", "applicant_dob", "customer_dob"],
+  case_id: ["case_id", "request_id", "multi_app_id", "multiapp_id", "batch_id", "session_id", "prequal_id", "group_id", "financing_request", "request_no", "request"],
+  inquiry_type: ["inquiry_type", "inquiry", "pull_type", "credit_pull", "soft_pull", "check_type", "application_kind", "prequal", "soft_hard"],
 };
 
 // When one export header could mean two things (e.g. "amount", "date", "id") the earlier
@@ -70,7 +74,22 @@ export interface ColumnMap {
   unmapped: string[];
 }
 
-export function mapHeaders(headers: string[]): ColumnMap {
+/**
+ * Makes header names unique ("Amount", "Amount" → "Amount", "Amount (2)") so a file with
+ * repeated column names can't silently lose a column in the mapping or the raw record.
+ */
+export function dedupeHeaders(headers: string[]): string[] {
+  const seen = new Map<string, number>();
+  return headers.map((h) => {
+    const name = h.trim() || "(blank)";
+    const n = (seen.get(name) ?? 0) + 1;
+    seen.set(name, n);
+    return n === 1 ? name : `${name} (${n})`;
+  });
+}
+
+export function mapHeaders(rawHeaders: string[]): ColumnMap {
+  const headers = dedupeHeaders(rawHeaders);
   const byColumn: Partial<Record<CanonicalColumn, number>> = {};
   const byHeader: Record<string, CanonicalColumn | null> = {};
   const unmapped: string[] = [];
@@ -155,11 +174,22 @@ export function normalizeApplicationType(raw: string | undefined): ApplicationTy
   return null;
 }
 
-/** Status plus whether the row implies funding (status "funded"/"used" ⇒ approved + funding). */
-export function normalizeStatus(raw: string | undefined): { status: ApplicationStatus; impliesFunded: boolean } | null {
+/**
+ * Status, whether the row implies funding ("funded"/"used" ⇒ approved + funding), and
+ * whether the wording implies a soft check ("prequalified"/"pre-approved" ⇒ soft inquiry).
+ */
+export function normalizeStatus(
+  raw: string | undefined,
+): { status: ApplicationStatus; impliesFunded: boolean; impliesSoft?: boolean } | null {
   const v = (raw ?? "").trim().toLowerCase().replace(/[^a-z ]/g, "").replace(/\s+/g, " ");
   if (!v) return null;
-  if (/^(approved|approve|accepted|conditionally approved|prequalified|pre approved|preapproved|qualified)$/.test(v)) {
+  if (/^(prequalified|pre qualified|prequal|pre approved|preapproved|soft approved|offer|offered)$/.test(v)) {
+    return { status: "approved", impliesFunded: false, impliesSoft: true };
+  }
+  if (/^(pre declined|predeclined|not prequalified|no offer)$/.test(v)) {
+    return { status: "declined", impliesFunded: false, impliesSoft: true };
+  }
+  if (/^(approved|approve|accepted|conditionally approved|qualified)$/.test(v)) {
     return { status: "approved", impliesFunded: false };
   }
   if (/^(funded|used|disbursed|booked|activated|purchased|complete|completed)$/.test(v)) {
@@ -179,14 +209,21 @@ export function normalizeStatus(raw: string | undefined): { status: ApplicationS
   return null;
 }
 
-/** Accepts ISO (2026-09-01, with or without time), US (9/1/2026, 09-01-2026), and "Sep 1, 2026". */
+/**
+ * Accepts ISO (2026-09-01, with or without time), US (9/1/2026, 09-01-2026), and
+ * "Sep 1, 2026". A slash date whose first part can't be a month (31/12/2026) is read
+ * day-first. Ambiguous ones (1/2/2026) are always month-first — US lender exports.
+ */
 export function normalizeDate(raw: string | undefined): string | null | "invalid" {
   const v = (raw ?? "").trim();
   if (!v) return null;
   let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/.exec(v);
   if (m) return build(m[1]!, m[2]!, m[3]!);
   m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:[ T].*)?$/.exec(v);
-  if (m) return build(m[3]!, m[1]!, m[2]!);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]);
+    return a > 12 && b <= 12 ? build(m[3]!, m[2]!, m[1]!) : build(m[3]!, m[1]!, m[2]!);
+  }
   m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2})$/.exec(v);
   if (m) return build(`20${m[3]}`, m[1]!, m[2]!);
   const ms = Date.parse(v);
@@ -210,7 +247,21 @@ export function normalizeAmount(raw: string | undefined): number | null | "inval
   const cleaned = v.replace(/[$,\s()]/g, "");
   if (!/^-?\d+(\.\d+)?$/.test(cleaned)) return "invalid";
   const n = Number(cleaned) * (negative ? -1 : 1);
+  // financing_applications amounts are NUMERIC(12,2); anything near that is a data error,
+  // and letting it through would abort the whole import's transaction.
+  if (Math.abs(n) >= MAX_AMOUNT) return "invalid";
   return Math.round(n * 100) / 100;
+}
+
+export const MAX_AMOUNT = 10_000_000; // $10M — no dental case costs this
+
+/** "soft" / "prequal" / "soft pull" / "Y" → soft; "hard" / "full" / "N" → hard; unknown → null. */
+export function normalizeInquiryType(raw: string | undefined): "soft" | "hard" | null {
+  const v = (raw ?? "").trim().toLowerCase().replace(/[^a-z]/g, "");
+  if (!v) return null;
+  if (["soft", "softpull", "softcheck", "softinquiry", "prequal", "prequalification", "prequalify", "precheck", "y", "yes", "true", "multi", "multiapp"].includes(v)) return "soft";
+  if (["hard", "hardpull", "hardcheck", "hardinquiry", "full", "fullapplication", "application", "n", "no", "false", "single"].includes(v)) return "hard";
+  return null;
 }
 
 export function normalizeText(raw: string | undefined): string | null {
@@ -240,6 +291,10 @@ export interface NormalizedApplication {
   patientFirstName: string | null;
   patientLastName: string | null;
   patientDob: string | null;
+  /** Explicit multi-app / request id from the export, if any. */
+  externalCaseId: string | null;
+  /** soft = prequalification, hard = full application, null = export doesn't say. */
+  inquiryType: "soft" | "hard" | null;
   /** Stable key for re-imports of files without an external id. */
   dedupeKey: string;
 }
@@ -249,45 +304,58 @@ export interface RowError {
   message: string;
 }
 
+/** Non-fatal problems with an imported row — the row is still imported, but flagged. */
+export type RowWarning = RowError;
+
+export type NormalizeResult =
+  | { ok: true; record: NormalizedApplication; raw: Record<string, string>; warnings: RowWarning[] }
+  | { ok: false; error: RowError; raw: Record<string, string>; warnings: RowWarning[] };
+
 export function normalizeRow(
   values: string[],
   headers: string[],
   map: ColumnMap,
   rowNumber: number,
-): { ok: true; record: NormalizedApplication; raw: Record<string, string> } | { ok: false; error: RowError; raw: Record<string, string> } {
+  opts: { today?: string } = {},
+): NormalizeResult {
+  const uniqueHeaders = dedupeHeaders(headers);
   const get = (col: CanonicalColumn) => {
     const i = map.byColumn[col];
     return i === undefined ? undefined : values[i];
   };
   const raw: Record<string, string> = {};
-  headers.forEach((h, i) => (raw[h] = values[i] ?? ""));
-  const fail = (message: string) => ({ ok: false as const, error: { row: rowNumber, message }, raw });
+  uniqueHeaders.forEach((h, i) => (raw[h] = values[i] ?? ""));
+  const warnings: RowWarning[] = [];
+  const warn = (message: string) => warnings.push({ row: rowNumber, message });
+  const fail = (message: string) => ({ ok: false as const, error: { row: rowNumber, message }, raw, warnings });
+  const today = opts.today ?? new Date().toISOString().slice(0, 10);
 
+  // --- hard requirements -----------------------------------------------------------------
   const lender = normalizeLender(get("lender"));
   if (!lender) return fail(`unknown lender "${get("lender") ?? ""}"`);
 
   const statusRaw = get("status");
   const status = normalizeStatus(statusRaw);
-  if (!status) return fail(statusRaw ? `unknown status "${statusRaw}"` : "status is required");
+  if (!status) return fail(statusRaw?.trim() ? `unknown status "${statusRaw.trim()}"` : "status is required");
 
-  const dates = {
-    submittedDate: normalizeDate(get("submitted_date")),
-    decisionDate: normalizeDate(get("decision_date")),
-    fundedDate: normalizeDate(get("funded_date")),
-    patientDob: normalizeDate(get("patient_dob")),
-  };
-  for (const [k, v] of Object.entries(dates)) if (v === "invalid") return fail(`invalid date in ${k}: "${get(k === "patientDob" ? "patient_dob" : (k.replace(/Date$/, "_date") as CanonicalColumn))}"`);
+  const dateCols = { submittedDate: "submitted_date", decisionDate: "decision_date", fundedDate: "funded_date", patientDob: "patient_dob" } as const;
+  const dates: Record<keyof typeof dateCols, string | null> = { submittedDate: null, decisionDate: null, fundedDate: null, patientDob: null };
+  for (const [k, col] of Object.entries(dateCols) as Array<[keyof typeof dateCols, CanonicalColumn]>) {
+    const v = normalizeDate(get(col));
+    if (v === "invalid") return fail(`invalid ${col} "${get(col)?.trim()}" (expected M/D/YYYY or YYYY-MM-DD)`);
+    dates[k] = v;
+    const rawV = get(col)?.trim() ?? "";
+    if (v && /^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4}/.test(rawV) && Number(rawV.split(/[\/\-.]/)[0]) > 12) warn(`${col} "${rawV}" read as day-first`);
+  }
 
-  const amounts = {
-    requestedAmount: normalizeAmount(get("requested_amount")),
-    approvedAmount: normalizeAmount(get("approved_amount")),
-    fundedAmount: normalizeAmount(get("funded_amount")),
-  };
-  for (const [k, v] of Object.entries(amounts)) if (v === "invalid") return fail(`invalid amount in ${k}`);
-
-  const typeRaw = get("application_type");
-  const applicationType = normalizeApplicationType(typeRaw) ?? (typeRaw?.trim() ? null : DEFAULT_APPLICATION_TYPE[lender]);
-  if (!applicationType) return fail(`unknown application type "${typeRaw}"`);
+  const amountCols = { requestedAmount: "requested_amount", approvedAmount: "approved_amount", fundedAmount: "funded_amount" } as const;
+  const amounts: Record<keyof typeof amountCols, number | null> = { requestedAmount: null, approvedAmount: null, fundedAmount: null };
+  for (const [k, col] of Object.entries(amountCols) as Array<[keyof typeof amountCols, CanonicalColumn]>) {
+    const v = normalizeAmount(get(col));
+    if (v === "invalid") return fail(`invalid ${col} "${get(col)?.trim()}" (not a number, or over $${MAX_AMOUNT.toLocaleString()})`);
+    if (v !== null && v < 0) return fail(`negative ${col} (${v})`);
+    amounts[k] = v;
+  }
 
   const externalId = normalizeText(get("external_id"));
   const patientLastName = normalizeText(get("patient_last_name"));
@@ -298,34 +366,100 @@ export function normalizeRow(
     return fail("row has no way to identify the application (needs an id, chart no, or patient name)");
   }
 
-  // Funding can be expressed as a status ("Funded") or as a funded date/amount.
-  const fundedDate = dates.fundedDate as string | null;
-  const fundedAmount = amounts.fundedAmount as number | null;
-  const impliesFunded = status.impliesFunded || fundedDate !== null || (fundedAmount !== null && fundedAmount > 0);
+  // --- soft problems: import, but flag --------------------------------------------------
+  const inquiryRaw = get("inquiry_type")?.trim();
+  let inquiryType = normalizeInquiryType(inquiryRaw);
+  if (inquiryRaw && !inquiryType) warn(`unknown inquiry type "${inquiryRaw}" — left blank`);
+  if (!inquiryType && status.impliesSoft) inquiryType = "soft";
+
+  const typeRaw = get("application_type")?.trim();
+  let applicationType = normalizeApplicationType(typeRaw);
+  if (!applicationType) {
+    applicationType = DEFAULT_APPLICATION_TYPE[lender];
+    if (typeRaw) warn(`unknown application type "${typeRaw}" — defaulted to ${applicationType} for ${lender}`);
+  }
+
+  const fundedAmount = amounts.fundedAmount;
+  const fundedDate = dates.fundedDate;
+  const hasFundingEvidence = fundedDate !== null || (fundedAmount !== null && fundedAmount > 0);
+  const impliesFunded = status.impliesFunded || hasFundingEvidence;
+  if (hasFundingEvidence && (status.status === "declined" || status.status === "pending")) {
+    warn(`status "${statusRaw?.trim()}" but a funded ${fundedDate ? "date" : "amount"} is present — treated as approved and funded`);
+  }
   const finalStatus = impliesFunded ? "approved" : status.status;
+
+  if (!dates.submittedDate) {
+    const fileHasDates = map.byColumn.submitted_date !== undefined || map.byColumn.decision_date !== undefined || map.byColumn.funded_date !== undefined;
+    if (fileHasDates) {
+      warn(dates.decisionDate || fundedDate
+        ? "no submitted date — using the earliest other date; check the export's columns"
+        : "no dates at all — the application won't appear in any date-filtered report");
+    }
+    dates.submittedDate = dates.decisionDate ?? fundedDate ?? null;
+  }
+  if (dates.decisionDate && dates.submittedDate && dates.decisionDate < dates.submittedDate) {
+    warn(`decision date ${dates.decisionDate} is before submitted date ${dates.submittedDate}`);
+  }
+  if (fundedDate && dates.submittedDate && fundedDate < dates.submittedDate) {
+    warn(`funded date ${fundedDate} is before submitted date ${dates.submittedDate}`);
+  }
+  for (const [k, v] of Object.entries({ submitted: dates.submittedDate, decision: dates.decisionDate, funded: fundedDate })) {
+    if (v && v > today) warn(`${k} date ${v} is in the future`);
+  }
+  // Only nag about a blank amount when the file has the column at all — a file without
+  // one gets a single file-level note instead of a warning per row.
+  if (finalStatus === "approved" && amounts.approvedAmount === null && !impliesFunded && map.byColumn.approved_amount !== undefined) {
+    warn("approved with no approved amount");
+  }
+  if (fundedAmount !== null && amounts.approvedAmount !== null && fundedAmount > amounts.approvedAmount) {
+    warn(`funded amount ${fundedAmount} exceeds approved amount ${amounts.approvedAmount}`);
+  }
+  if (finalStatus === "declined" && amounts.approvedAmount) warn("declined but has an approved amount");
+
+  let patientDob = dates.patientDob;
+  if (patientDob) {
+    const age = (Date.parse(today) - Date.parse(patientDob)) / (365.25 * 86_400_000);
+    if (age < 0 || age > 120) {
+      warn(`date of birth ${patientDob} is ${age < 0 ? "in the future" : "over 120 years ago"} — ignored for matching`);
+      patientDob = null;
+    }
+  }
+  const hasIdColumns = map.byColumn.patient_dob !== undefined || map.byColumn.chart_no !== undefined || map.byColumn.patient_id !== undefined;
+  if (!patientId && !chartNo && !patientDob && hasIdColumns) warn("no DOB, chart no or patient id on this row — matching by name only, which may be ambiguous");
 
   const record: NormalizedApplication = {
     externalId,
     lender,
     applicationType,
     status: finalStatus,
-    submittedDate: dates.submittedDate as string | null,
-    decisionDate: (dates.decisionDate as string | null) ?? (finalStatus === "approved" || finalStatus === "declined" ? (dates.submittedDate as string | null) : null),
-    requestedAmount: amounts.requestedAmount as number | null,
-    approvedAmount: amounts.approvedAmount as number | null,
+    submittedDate: dates.submittedDate,
+    decisionDate: dates.decisionDate ?? (finalStatus === "approved" || finalStatus === "declined" ? dates.submittedDate : null),
+    requestedAmount: amounts.requestedAmount,
+    approvedAmount: amounts.approvedAmount,
     declineReason: finalStatus === "declined" ? normalizeText(get("decline_reason")) : null,
-    fundedDate: impliesFunded ? (fundedDate ?? (dates.decisionDate as string | null) ?? (dates.submittedDate as string | null)) : null,
-    fundedAmount: impliesFunded ? (fundedAmount ?? amounts.approvedAmount as number | null) : null,
+    fundedDate: impliesFunded ? (fundedDate ?? dates.decisionDate ?? dates.submittedDate) : null,
+    fundedAmount: impliesFunded ? (fundedAmount ?? amounts.approvedAmount) : null,
     location: normalizeText(get("location")),
     patientId,
     chartNo,
     patientFirstName,
     patientLastName,
-    patientDob: dates.patientDob as string | null,
+    patientDob,
+    externalCaseId: normalizeText(get("case_id")),
+    inquiryType,
     dedupeKey: "",
   };
   record.dedupeKey = externalId
     ? `${lender}:${externalId}`
-    : [lender, patientId ?? chartNo ?? `${(patientLastName ?? "").toLowerCase()}|${(patientFirstName ?? "").toLowerCase()}|${record.patientDob ?? ""}`, record.submittedDate ?? ""].join(":");
-  return { ok: true, record, raw };
+    : [lender, patientId ?? chartNo ?? `${nameKey(patientLastName)}|${nameKey(patientFirstName)}|${record.patientDob ?? ""}`, record.submittedDate ?? ""].join(":");
+  return { ok: true, record, raw, warnings };
+}
+
+/** Letters only, lower-case, accents stripped: "Muñoz-O'Brien" → "munozobrien". Used for keys and matching. */
+export function nameKey(name: string | null | undefined): string {
+  return (name ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
 }

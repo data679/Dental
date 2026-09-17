@@ -128,6 +128,24 @@ export interface LenderRate {
   count: number; // decisioned applications this rate is based on
 }
 
+/**
+ * Multi-app view. A "case" is one patient's round of applications for one treatment
+ * (docs/financing-intake.md § Multi-lender); practices often soft-check several lenders
+ * at once and let the patient pick from the approvals.
+ */
+export interface MultiLenderSummary {
+  cases: number;
+  multiLenderCases: number; // applied to 2+ lenders
+  avgLendersPerCase: number | null;
+  casesApproved: number; // approved by at least one lender
+  casesWithMultipleApprovals: number; // patient had a choice
+  casesFunded: number;
+  casesFundedFromMultipleApprovals: number;
+  inquiries: { soft: number; hard: number; unknown: number }; // application rows by pull type
+  /** Among cases with 2+ approvals: how often each approving lender was the one used. */
+  chosenLenderWhenMultiApproved: Array<{ lender: Lender; offered: number; chosen: number; winRate: number | null }>;
+}
+
 export interface FinanceSummary {
   filters: FinanceFilters;
   newPatients: PeriodStat;
@@ -135,4 +153,5 @@ export interface FinanceSummary {
   pctNewPatientsApplying: { current: number | null; prior: number | null };
   applicationsByLender: LenderCount[];
   approvalRateByLender: LenderRate[];
+  multiLender: MultiLenderSummary;
 }

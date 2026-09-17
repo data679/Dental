@@ -12,6 +12,7 @@ import { FilterBar, type Filters } from "../components/FilterBar";
 import { StatCard } from "../components/StatCard";
 import { LenderBarChart } from "../components/LenderBarChart";
 import { FunnelChart } from "../components/FunnelChart";
+import { MultiLenderCard } from "../components/MultiLenderCard";
 
 function defaultFilters(): Filters {
   const to = new Date();
@@ -123,13 +124,21 @@ export function Dashboard() {
         </>
       )}
 
+      {finance && <MultiLenderCard summary={finance.multiLender} />}
+
       {funnel && (
         <Card>
           <Text className="mb-2 font-medium">Patient-to-Financing Funnel</Text>
           <Text className="mb-3 text-xs text-gray-500">
             Patient stages count patients by first visit / plan presented / treatment finished in the
-            range; financing stages count applications submitted in the range and how many of those
-            were approved and funded. The lender filter applies to the financing stages.
+            range. Financing stages count <strong>cases</strong> — one patient's round of applications
+            for one treatment — opened in the range: how many were approved by at least one lender,
+            and how many were funded. {funnel.financing.cases.toLocaleString()} case
+            {funnel.financing.cases === 1 ? "" : "s"} from {funnel.financing.applications.toLocaleString()} application
+            {funnel.financing.applications === 1 ? "" : "s"}
+            {funnel.financing.multiLenderCases > 0 &&
+              ` · ${funnel.financing.multiLenderCases.toLocaleString()} went to more than one lender`}
+            . The lender filter keeps cases that applied to that lender.
           </Text>
           <FunnelChart stages={funnel.stages} />
         </Card>

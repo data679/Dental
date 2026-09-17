@@ -101,3 +101,26 @@ describe("splitIntoWindows", () => {
     expect(splitIntoWindows(new Date(d.getTime() + 1), d)).toEqual([]);
   });
 });
+
+describe("sparse / malformed Denticon records", () => {
+  it("mapPatient tolerates nulls and garbage dates", () => {
+    const m = mapPatient({ pgId: 1, patientId: 7, officeId: null as any, firstName: "  ", lastName: null as any, firstVisitDate: "not a date", birthDate: null, refTypeCode: "   " });
+    expect(m).toEqual({
+      denticonPatientId: "7", denticonOfficeId: 0, denticonProviderId: null, source: null, firstVisitDate: null,
+      firstName: null, lastName: null, birthDate: null, chartNo: null,
+    });
+  });
+
+  it("rollUpTreatmentPlan with no fees, no dates, mixed nulls", () => {
+    const plan = rollUpTreatmentPlan([
+      item({ fee: null, procedureCode: null, treatPlanProposedDate: null, createdOn: "garbage" }),
+      item({ fee: undefined as any, procedureCode: "  ", isCompleted: undefined }),
+    ]);
+    expect(plan).toMatchObject({ proposedFee: null, procedureCode: "", presentedDate: null, acceptedDate: null, completedDate: null, completedItemCount: 0 });
+  });
+
+  it("groupTreatmentPlanItems keeps items whose ids collide as one plan, and rollUp refuses an empty group", () => {
+    expect(groupTreatmentPlanItems([item({ treatPlanId: 5 }), item({ treatPlanId: 5 })]).get(5)).toHaveLength(2);
+    expect(() => rollUpTreatmentPlan([])).toThrow(/no items/);
+  });
+});

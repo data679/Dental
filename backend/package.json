@@ -16,7 +16,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "denticon:mock": "tsx src/scripts/denticonMock.ts",
     "denticon:samples": "tsx src/scripts/denticonSamples.ts",
-    "financing:sample": "tsx src/scripts/financingSample.ts"
+    "financing:sample": "tsx src/scripts/financingSample.ts",
+    "test:db": "node scripts/testDb.mjs",
+    "snapshot": "tsx src/scripts/snapshot.ts",
+    "snapshot:verify": "tsx scripts/verifySnapshotParity.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

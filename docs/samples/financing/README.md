@@ -8,9 +8,12 @@ and populates the applications → approved → funded funnel stages.
 
 Headers intentionally mimic a lender portal export ("Financing Co.", "Credit Limit",
 "Purchase Date", "Merchant Name") rather than our canonical column names, to exercise the
-header aliasing in `backend/src/etl/financing/columns.ts`. The last three rows are
-deliberate edge cases: two applicants who don't exist in the PMS (imported as *unmatched*)
-and one unknown status (*rejected* with a row error).
+header aliasing in `backend/src/etl/financing/columns.ts`. About half the rounds are
+**multi-app**: a soft check at 2–3 lenders on the same day ("Prequalified" /
+"Pre-declined", Inquiry Type = Soft), with the patient using at most one approval; some
+carry a Request ID, most are grouped by date window. The last three rows are deliberate
+edge cases: two applicants who don't exist in the PMS (imported as *unmatched*) and one
+unknown status (*rejected* with a row error).
 
 Import it from the dashboard's **Import** page, or:
 
@@ -20,4 +23,4 @@ curl -X POST 'http://localhost:4000/api/finance/import?sourceFile=sample-lender-
 ```
 
 The canonical template (headers the importer needs no aliases for) is
-`GET /api/finance/import/template`. 114 rows; every name, DOB and id is invented.
+`GET /api/finance/import/template`. 196 rows; every name, DOB and id is invented.

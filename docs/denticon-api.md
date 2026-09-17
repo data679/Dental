@@ -78,7 +78,10 @@ added the same way; ledger data is the likely source for real "case value" later
    are picked up next run.
 
 Progress and last-run outcome per (entity, office) live in `denticon_sync_state`
-(`GET /api/denticon/status`).
+(`GET /api/denticon/status`). One office failing (403 out of scope, persistent 5xx)
+doesn't stop the others: its error is recorded, the rest sync and process, and the job
+fails at the end with a summary. Records without a `patientId` / `treatPlanId` are
+skipped and counted rather than stored under a null key.
 
 ### Status mapping
 

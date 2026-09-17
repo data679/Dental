@@ -44,9 +44,18 @@ function buildFilterClause(
 // New patients, treatment presented and treatment completed count distinct patients from
 // the Denticon-fed tables; the three financing stages count applications from the lender
 // CSV intake (docs/financing-intake.md).
-export async function getFunnelSummary(
-  filters: FunnelFilters,
-): Promise<FunnelStageSummary[]> {
+export interface FunnelSummary {
+  stages: FunnelStageSummary[];
+  /** How the financing stages were built: cases vs raw application rows. */
+  financing: {
+    cases: number;
+    applications: number;
+    multiLenderCases: number;
+    avgLendersPerCase: number | null;
+  };
+}
+
+export async function getFunnelSummary(filters: FunnelFilters): Promise<FunnelSummary> {
   const patientsClause = buildFilterClause(filters, { table: "patients" });
   const { rows: np } = await pool.query<{ count: string }>(
     `SELECT count(*)::text AS count FROM patients ${patientsClause.where}`,
@@ -90,31 +99,44 @@ export async function getFunnelSummary(
     completed.params,
   );
 
-  // Financing stages are a cohort of applications *submitted* in the range: how many of
-  // those were approved, and how many of those funded. Same date basis for all three
-  // keeps the funnel monotonic. Location comes from the application itself when the
-  // lender named it, else from the matched patient; the provider filter can only apply
-  // through a matched patient, so unmatched applications drop out under that filter.
+  // Financing stages count *cases* (one patient's round of applications for one
+  // treatment — see docs/financing-intake.md § Multi-lender), not application rows:
+  // opened in the range → approved by at least one lender → funded. Same date basis
+  // for all three keeps the funnel monotonic. Location/provider come from the case (the
+  // file's practice column, else the matched patient); a lender filter keeps cases that
+  // applied to that lender.
   const financing = financingClause(filters);
-  const { rows: faRows } = await pool.query<{ submitted: string; approved: string; funded: string }>(
-    `SELECT count(*)::text AS submitted,
-            count(*) FILTER (WHERE fa.status = 'approved')::text AS approved,
-            count(f.id)::text AS funded
-       FROM financing_applications fa
-       LEFT JOIN patients p ON p.id = fa.patient_id
-       LEFT JOIN fundings f ON f.application_id = fa.id
+  const { rows: faRows } = await pool.query<{
+    cases: string; approved: string; funded: string; applications: string; multi: string; lenders: string;
+  }>(
+    `SELECT count(*)::text AS cases,
+            count(*) FILTER (WHERE cs.approvals > 0)::text AS approved,
+            count(*) FILTER (WHERE cs.funded)::text AS funded,
+            coalesce(sum(cs.applications), 0)::text AS applications,
+            count(*) FILTER (WHERE cs.lenders > 1)::text AS multi,
+            coalesce(sum(cs.lenders), 0)::text AS lenders
+       FROM financing_case_summary cs
        ${financing.where}`,
     financing.params,
   );
+  const cases = Number(faRows[0]?.cases ?? 0);
 
-  return [
-    { stage: "new_patients", count: Number(np[0]?.count ?? 0) },
-    { stage: "treatment_presented", count: Number(tpRows[0]?.count ?? 0) },
-    { stage: "applications_submitted", count: Number(faRows[0]?.submitted ?? 0) },
-    { stage: "applications_approved", count: Number(faRows[0]?.approved ?? 0) },
-    { stage: "funded", count: Number(faRows[0]?.funded ?? 0) },
-    { stage: "treatment_completed", count: Number(tcRows[0]?.count ?? 0) },
-  ];
+  return {
+    stages: [
+      { stage: "new_patients", count: Number(np[0]?.count ?? 0) },
+      { stage: "treatment_presented", count: Number(tpRows[0]?.count ?? 0) },
+      { stage: "applications_submitted", count: cases },
+      { stage: "applications_approved", count: Number(faRows[0]?.approved ?? 0) },
+      { stage: "funded", count: Number(faRows[0]?.funded ?? 0) },
+      { stage: "treatment_completed", count: Number(tcRows[0]?.count ?? 0) },
+    ],
+    financing: {
+      cases,
+      applications: Number(faRows[0]?.applications ?? 0),
+      multiLenderCases: Number(faRows[0]?.multi ?? 0),
+      avgLendersPerCase: cases ? Number((Number(faRows[0]?.lenders ?? 0) / cases).toFixed(2)) : null,
+    },
+  };
 }
 
 function financingClause(filters: FunnelFilters): { where: string; params: unknown[] } {
@@ -122,23 +144,23 @@ function financingClause(filters: FunnelFilters): { where: string; params: unkno
   const params: unknown[] = [];
   if (filters.locationId !== undefined) {
     params.push(filters.locationId);
-    clauses.push(`COALESCE(fa.location_id, p.location_id) = $${params.length}`);
+    clauses.push(`cs.location_id = $${params.length}`);
   }
   if (filters.providerId !== undefined) {
     params.push(filters.providerId);
-    clauses.push(`p.provider_id = $${params.length}`);
+    clauses.push(`cs.provider_id = $${params.length}`);
   }
   if (filters.lender !== undefined) {
     params.push(filters.lender);
-    clauses.push(`fa.lender = $${params.length}`);
+    clauses.push(`EXISTS (SELECT 1 FROM financing_applications fa WHERE fa.case_id = cs.case_id AND fa.lender = $${params.length})`);
   }
   if (filters.dateFrom !== undefined) {
     params.push(filters.dateFrom);
-    clauses.push(`fa.submitted_date >= $${params.length}`);
+    clauses.push(`cs.opened_date >= $${params.length}`);
   }
   if (filters.dateTo !== undefined) {
     params.push(filters.dateTo);
-    clauses.push(`fa.submitted_date <= $${params.length}`);
+    clauses.push(`cs.opened_date <= $${params.length}`);
   }
   return { where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }

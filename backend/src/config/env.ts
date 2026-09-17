@@ -39,6 +39,9 @@ const envSchema = z.object({
   DENTICON_BACKFILL_DAYS: z.coerce.number().int().positive().default(365),
   // Cron for the recurring incremental sync registered by the worker. Empty = disabled.
   DENTICON_SYNC_CRON: z.string().default("15 * * * *"),
+  // Applications for the same patient submitted within this many days of each other are
+  // one financing case (a "multi-app" round). See docs/financing-intake.md.
+  FINANCING_CASE_WINDOW_DAYS: z.coerce.number().int().min(0).max(365).default(14),
 });
 
 // Fails fast with a clear message rather than letting a missing var surface later as a

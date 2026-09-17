@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Text, Title } from "@tremor/react";
 import {
+  getDataQuality,
   getImportBatches,
   getUnmatchedApplications,
   importFinancingCsv,
   rematchApplications,
+  type DataQualityReport,
   type ImportBatch,
   type ImportResult,
   type UnmatchedApplication,
+  STATIC_MODE,
 } from "../lib/api";
+import { DataQualityPanel } from "../components/DataQualityPanel";
 
 // Manual intake for lender application exports. Upload → immediate per-row outcome →
 // history of past uploads → list of applications that couldn't be linked to a patient.
@@ -40,12 +44,14 @@ export function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [unmatched, setUnmatched] = useState<UnmatchedApplication[]>([]);
+  const [quality, setQuality] = useState<DataQualityReport | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
     getImportBatches().then(setBatches).catch(() => undefined);
     getUnmatchedApplications().then(setUnmatched).catch(() => undefined);
+    getDataQuality().then(setQuality).catch(() => undefined);
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -87,14 +93,28 @@ export function ImportPage() {
       <Text className="mb-6 text-gray-500">
         Upload a lender's application export (CSV). Rows are matched to patients by chart number or
         name + date of birth, and re-uploading the same file updates rather than duplicates.{" "}
-        <a className="text-blue-600 underline" href="/api/finance/import/template">
-          Download the column template
-        </a>
+        {STATIC_MODE ? (
+          <span>The column template is served by the backend (<code>GET /api/finance/import/template</code>)</span>
+        ) : (
+          <a className="text-blue-600 underline" href="/api/finance/import/template">
+            Download the column template
+          </a>
+        )}
         .
       </Text>
 
+      {STATIC_MODE && (
+        <Card className="mb-6 border-l-4 border-amber-400">
+          <Text className="text-sm text-amber-900">
+            Uploading needs the backend, which this demo doesn't have. Below is what the page looks like after the
+            sample lender export was imported locally: the import history, the data-quality report and the
+            applications that couldn't be matched to a patient.
+          </Text>
+        </Card>
+      )}
+
       <Card
-        className={`mb-6 border-2 border-dashed text-center transition-colors ${dragOver ? "border-blue-500 bg-blue-50" : "border-gray-300"}`}
+        className={`mb-6 border-2 border-dashed text-center transition-colors ${dragOver ? "border-blue-500 bg-blue-50" : "border-gray-300"} ${STATIC_MODE ? "opacity-50" : ""}`}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -134,13 +154,25 @@ export function ImportPage() {
       {result && (
         <Card className="mb-6">
           <Text className="mb-3 font-medium">Import #{result.batchId} result</Text>
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <Stat label="Rows" value={result.rowCount} />
             <Stat label="Inserted" value={result.inserted} />
             <Stat label="Updated" value={result.updated} />
             <Stat label="Unmatched patient" value={result.unmatched} tone={result.unmatched ? "warn" : undefined} />
+            <Stat label="Duplicates in file" value={result.duplicates} tone={result.duplicates ? "warn" : undefined} />
             <Stat label="Rejected" value={result.rejected} tone={result.rejected ? "bad" : undefined} />
           </div>
+
+          {result.notes.length > 0 && (
+            <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3">
+              <Text className="mb-1 text-sm font-medium text-blue-800">About this file</Text>
+              <ul className="list-inside list-disc text-sm text-blue-900">
+                {result.notes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {result.errors.length > 0 && (
             <div className="mb-4">
@@ -154,6 +186,22 @@ export function ImportPage() {
                 {result.errors.length > 25 && <li>…and {result.errors.length - 25} more</li>}
               </ul>
             </div>
+          )}
+
+          {result.warnings.length > 0 && (
+            <details className="mb-4" open={result.warnings.length <= 15}>
+              <summary className="cursor-pointer text-sm font-medium text-amber-700">
+                {result.warnings.length} row warning{result.warnings.length === 1 ? "" : "s"} — imported, but check these
+              </summary>
+              <ul className="mt-1 list-inside list-disc text-sm text-gray-700">
+                {result.warnings.slice(0, 100).map((w, i) => (
+                  <li key={i}>
+                    Row {w.row}: {w.message}
+                  </li>
+                ))}
+                {result.warnings.length > 100 && <li>…and {result.warnings.length - 100} more</li>}
+              </ul>
+            </details>
           )}
 
           <details>
@@ -193,6 +241,8 @@ export function ImportPage() {
                   <th className="py-1 pr-4 text-right">Inserted</th>
                   <th className="py-1 pr-4 text-right">Updated</th>
                   <th className="py-1 pr-4 text-right">Unmatched</th>
+                  <th className="py-1 pr-4 text-right">Dupes</th>
+                  <th className="py-1 pr-4 text-right">Warnings</th>
                   <th className="py-1 text-right">Rejected</th>
                 </tr>
               </thead>
@@ -206,6 +256,8 @@ export function ImportPage() {
                     <td className="py-1 pr-4 text-right">{b.inserted}</td>
                     <td className="py-1 pr-4 text-right">{b.updated}</td>
                     <td className="py-1 pr-4 text-right">{b.unmatched}</td>
+                    <td className={`py-1 pr-4 text-right ${b.duplicates ? "text-amber-700" : ""}`}>{b.duplicates ?? 0}</td>
+                    <td className={`py-1 pr-4 text-right ${b.warnings?.length ? "text-amber-700" : ""}`}>{b.warnings?.length ?? 0}</td>
                     <td className={`py-1 text-right ${b.rejected ? "text-red-700" : ""}`}>{b.rejected}</td>
                   </tr>
                 ))}
@@ -214,6 +266,8 @@ export function ImportPage() {
           </div>
         )}
       </Card>
+
+      {quality && <DataQualityPanel report={quality} onRefresh={() => getDataQuality().then(setQuality).catch(() => undefined)} />}
 
       <Card>
         <div className="mb-3 flex items-center justify-between">

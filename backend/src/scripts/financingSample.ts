@@ -11,10 +11,15 @@ import { toCsvLine } from "../etl/financing/csv.js";
 // the financing stages of the funnel. Headers are deliberately *not* the canonical ones —
 // they look like a real portal export, to exercise the alias mapping.
 //
-// Assumptions baked in (all invented, tune freely): 45% of patients with a plan apply;
-// prime lenders first, a declined prime application is followed by a second-look
-// (subprime) one 60% of the time; 60/25/8/7 approved/declined/pending/withdrawn;
-// 70% of approvals fund within 3 weeks at 60–100% of the approved amount.
+// Assumptions baked in (all invented, tune freely): 45% of patients with a plan apply.
+// Two workflows, mirroring how the practice actually works:
+//   • multi-app (55% of rounds): a soft check at 2–3 prime lenders the same day
+//     ("Prequalified"/"Pre-declined"), the patient picks one approval to use; some rounds
+//     carry a Request ID from the portal, most don't (grouped by date window instead).
+//   • single application (45%): one prime lender; a declined one is followed by a
+//     second-look subprime application 60% of the time.
+// 60/25/8/7 approved/declined/pending/withdrawn; ~70% of chosen approvals fund within
+// 3 weeks at 60–100% of the approved amount.
 
 const outDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../docs/samples/financing");
 const REF = process.env.FINANCING_SAMPLE_REF_DATE ? new Date(process.env.FINANCING_SAMPLE_REF_DATE) : new Date();
@@ -46,10 +51,11 @@ const plans = [...groupTreatmentPlanItems(data.treatmentPlanItems).values()].map
 interface Row {
   id: string; lender: string; tier: string; status: string; applied: string; decided: string | null;
   requested: number; approved: number | null; reason: string; funded: string | null; fundedAmt: number | null;
-  merchant: string; first: string; last: string; dob: string; chart: string;
+  merchant: string; first: string; last: string; dob: string; chart: string; inquiry: string; requestId: string;
 }
 const rows: Row[] = [];
 let appSeq = 100230;
+let reqSeq = 5001;
 
 for (const plan of plans) {
   if (plan.status === "declined" || !plan.presentedDate || plan.presentedDate > REF.toISOString().slice(0, 10)) continue;
@@ -57,32 +63,63 @@ for (const plan of plans) {
   const patient = patientsById.get(Number(plan.denticonPatientId))!;
   const requested = Math.max(300, Math.round((plan.proposedFee ?? 500) / 50) * 50);
 
-  const makeApp = (lender: string, tier: string, appliedOn: string): Row => {
+  const today = REF.toISOString().slice(0, 10);
+  const makeApp = (lender: string, tier: string, appliedOn: string, opts: { soft?: boolean; fund?: boolean; requestId?: string } = {}): Row => {
     const status = weighted([["Approved", 60], ["Declined", 25], ["Pending", 8], ["Withdrawn", 7]] as const);
     const decided = status === "Approved" || status === "Declined" ? addDays(appliedOn, weighted([[0, 70], [1, 20], [3, 10]])) : null;
     const approved = status === "Approved" ? Math.round((requested * (1 + rnd() * 0.5)) / 100) * 100 : null;
-    const willFund = status === "Approved" && rnd() < 0.7;
+    const willFund = status === "Approved" && (opts.fund ?? rnd() < 0.7);
     const fundedOn = willFund ? addDays(decided!, 3 + Math.floor(rnd() * 18)) : null;
     const fundedAmt = willFund ? Math.round(approved! * (0.6 + rnd() * 0.4)) : null;
+    // Soft checks come back as prequal wording in most portals.
+    const shown = opts.soft
+      ? ({ Approved: "Prequalified", Declined: "Pre-declined", Pending: "Pending", Withdrawn: "Withdrawn" } as const)[status]
+      : status;
     return {
       id: `${lender.slice(0, 2).toUpperCase()}-${appSeq++}`,
       lender, tier,
-      status: willFund && rnd() < 0.5 ? "Funded" : status, // some exports say "Funded", some keep "Approved" + a funded date
+      status: willFund && rnd() < 0.5 ? "Funded" : shown, // some exports say "Funded", some keep the approval + a funded date
       applied: appliedOn, decided, requested, approved,
       reason: status === "Declined" ? pick(DECLINE_REASONS) : "",
-      funded: fundedOn && fundedOn <= REF.toISOString().slice(0, 10) ? fundedOn : null,
-      fundedAmt: fundedOn && fundedOn <= REF.toISOString().slice(0, 10) ? fundedAmt : null,
+      funded: fundedOn && fundedOn <= today ? fundedOn : null,
+      fundedAmt: fundedOn && fundedOn <= today ? fundedAmt : null,
       merchant: `Sample Dental – ${officeName.get(patient.officeId)}`,
       first: patient.firstName, last: patient.lastName,
       dob: patient.birthDate!.slice(0, 10), chart: rnd() < 0.15 ? patient.chartNo! : "",
+      inquiry: opts.soft ? "Soft" : "Hard",
+      requestId: opts.requestId ?? "",
     };
   };
 
   const applied = addDays(plan.presentedDate, Math.floor(rnd() * 6));
-  const first = makeApp(weighted(PRIME), "Prime", applied);
-  rows.push(first);
-  if (first.status === "Declined" && rnd() < 0.6) {
-    rows.push(makeApp(weighted(SUBPRIME), "SubPrime", addDays(first.decided!, Math.floor(rnd() * 3))));
+  if (rnd() < 0.55) {
+    // Multi-app round: 2–3 distinct prime lenders, same day, soft pulls; the patient uses
+    // at most one of the approvals.
+    const lenders = new Set<string>();
+    while (lenders.size < 2 + (rnd() < 0.4 ? 1 : 0)) lenders.add(weighted(PRIME));
+    const requestId = rnd() < 0.3 ? `REQ-${reqSeq++}` : undefined;
+    const round = [...lenders].map((l) => makeApp(l, "Prime", applied, { soft: true, fund: false, requestId }));
+    const approvals = round.filter((r) => r.approved !== null);
+    if (approvals.length && rnd() < 0.75) {
+      // Patient picks one: prefer the biggest approval 70% of the time, else any.
+      const chosen = rnd() < 0.7 ? approvals.reduce((a, b) => (b.approved! > a.approved! ? b : a)) : pick(approvals);
+      const fundedOn = addDays(chosen.decided!, 3 + Math.floor(rnd() * 18));
+      if (fundedOn <= today) {
+        chosen.funded = fundedOn;
+        chosen.fundedAmt = Math.round(chosen.approved! * (0.6 + rnd() * 0.4));
+        if (rnd() < 0.5) chosen.status = "Funded";
+      }
+    }
+    rows.push(...round);
+    if (!approvals.length && rnd() < 0.6) {
+      rows.push(makeApp(weighted(SUBPRIME), "SubPrime", addDays(applied, 1 + Math.floor(rnd() * 3)), { requestId }));
+    }
+  } else {
+    const first = makeApp(weighted(PRIME), "Prime", applied);
+    rows.push(first);
+    if (first.status === "Declined" && rnd() < 0.6) {
+      rows.push(makeApp(weighted(SUBPRIME), "SubPrime", addDays(first.decided!, Math.floor(rnd() * 3))));
+    }
   }
 }
 
@@ -94,8 +131,8 @@ rows.push({ ...rows[2]!, id: "SU-999003", lender: "Sunbit", status: "Kinda appro
 
 rows.sort((a, b) => a.applied.localeCompare(b.applied));
 
-const headers = ["Application ID", "Financing Co.", "Program", "Decision", "Application Date", "Decision Date", "Amount Requested", "Credit Limit", "Decision Reason", "Purchase Date", "Purchase Amount", "Merchant Name", "Applicant First Name", "Applicant Last Name", "DOB", "Chart #"];
-const lines = [toCsvLine(headers), ...rows.map((r) => toCsvLine([r.id, r.lender, r.tier, r.status, us(r.applied), us(r.decided), money(r.requested), money(r.approved), r.reason, us(r.funded), money(r.fundedAmt), r.merchant, r.first, r.last, us(r.dob), r.chart]))];
+const headers = ["Application ID", "Request ID", "Financing Co.", "Program", "Inquiry Type", "Decision", "Application Date", "Decision Date", "Amount Requested", "Credit Limit", "Decision Reason", "Purchase Date", "Purchase Amount", "Merchant Name", "Applicant First Name", "Applicant Last Name", "DOB", "Chart #"];
+const lines = [toCsvLine(headers), ...rows.map((r) => toCsvLine([r.id, r.requestId, r.lender, r.tier, r.inquiry, r.status, us(r.applied), us(r.decided), money(r.requested), money(r.approved), r.reason, us(r.funded), money(r.fundedAmt), r.merchant, r.first, r.last, us(r.dob), r.chart]))];
 
 await mkdir(outDir, { recursive: true });
 await writeFile(path.join(outDir, "sample-lender-export.csv"), lines.join("\r\n") + "\r\n");
@@ -111,9 +148,12 @@ and populates the applications → approved → funded funnel stages.
 
 Headers intentionally mimic a lender portal export ("Financing Co.", "Credit Limit",
 "Purchase Date", "Merchant Name") rather than our canonical column names, to exercise the
-header aliasing in \`backend/src/etl/financing/columns.ts\`. The last three rows are
-deliberate edge cases: two applicants who don't exist in the PMS (imported as *unmatched*)
-and one unknown status (*rejected* with a row error).
+header aliasing in \`backend/src/etl/financing/columns.ts\`. About half the rounds are
+**multi-app**: a soft check at 2–3 lenders on the same day ("Prequalified" /
+"Pre-declined", Inquiry Type = Soft), with the patient using at most one approval; some
+carry a Request ID, most are grouped by date window. The last three rows are deliberate
+edge cases: two applicants who don't exist in the PMS (imported as *unmatched*) and one
+unknown status (*rejected* with a row error).
 
 Import it from the dashboard's **Import** page, or:
 

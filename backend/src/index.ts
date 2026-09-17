@@ -6,6 +6,7 @@ import { financeRouter } from "./routes/finance.js";
 import { financeImportRouter } from "./routes/financeImport.js";
 import { locationsRouter } from "./routes/locations.js";
 import { denticonRouter } from "./routes/denticon.js";
+import { dataQualityRouter } from "./routes/dataQuality.js";
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use("/api/finance", financeImportRouter);
 app.use("/api/finance", financeRouter);
 app.use("/api/locations", locationsRouter);
 app.use("/api/denticon", denticonRouter);
+app.use("/api/data-quality", dataQualityRouter);
 
 // Centralized error handler — never leak stack traces/internals to the client.
 // (Express only recognises an error handler by its arity: all four params are required.)

@@ -24,3 +24,23 @@ describe("parseCsv", () => {
     expect(parseCsv(`h1,h2,h3,h4\n${line}`).rows[0]).toEqual(["Doe, Jane", 'say "hi"', "12", ""]);
   });
 });
+
+describe("degenerate files", () => {
+  it("header-only, blank-only, whitespace-only and quoted headers", () => {
+    expect(parseCsv("Lender,Status\n")).toEqual({ headers: ["Lender", "Status"], rows: [] });
+    expect(parseCsv("\n\n   \n")).toEqual({ headers: [], rows: [] });
+    expect(parseCsv("")).toEqual({ headers: [], rows: [] });
+    expect(parseCsv('"Lender","Status, Final"\r\nCherry,"Approved"').headers).toEqual(["Lender", "Status, Final"]);
+  });
+
+  it("ragged rows: short rows read as blanks, long rows keep extra cells", () => {
+    const { rows } = parseCsv("a,b,c\n1\n1,2,3,4");
+    expect(rows).toEqual([["1"], ["1", "2", "3", "4"]]);
+  });
+
+  it("an unterminated quote doesn't hang or throw", () => {
+    const { headers, rows } = parseCsv('a,b\n"open,1\nnext,2');
+    expect(headers).toEqual(["a", "b"]);
+    expect(rows).toHaveLength(1); // everything after the stray quote becomes one cell
+  });
+});

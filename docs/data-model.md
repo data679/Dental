@@ -29,6 +29,10 @@ score, with down payment).
 - **Financing application** — id, patient_id, treatment_plan_id, lender, application_type
   (primary | subprime), status, submitted_date, decision_date, approved_amount,
   decline_reason
+- **Financing case** — id, patient_id, case_key, external_case_id (portal request id),
+  location_id, opened_date. One patient's round of applications for one treatment;
+  outcome derived from its applications (see financing-intake.md § Multi-lender).
+  Applications carry `case_id` and `inquiry_type` (soft/hard).
 - **Funding** — id, application_id, funded_date, funded_amount, utilization_pct
 - **Treatment completion** — id, treatment_plan_id, completed_date, case_value
 

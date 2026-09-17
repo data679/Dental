@@ -43,7 +43,7 @@ export async function syncTreatmentPlansForOffice(
         OfficeId: opts.officeId,
         LastChangedOn: { DateFrom: toDenticonDateTime(w.from), DateTo: toDenticonDateTime(w.to) },
       })) {
-        touchedPatients.add(item.patientId);
+        if (item.patientId !== undefined && item.patientId !== null) touchedPatients.add(item.patientId);
       }
 
       for (const patientId of touchedPatients) {
@@ -69,7 +69,13 @@ async function upsertPatientPlans(
   officeId: number,
   items: DenticonTreatmentPlanItem[],
 ): Promise<number> {
-  const byPlan = groupTreatmentPlanItems(items);
+  // Items without a plan id can't be grouped or keyed — drop them rather than pile up
+  // NULL-keyed staging rows (the unique index allows any number of NULLs).
+  const usable = items.filter((i) => i.treatPlanId !== undefined && i.treatPlanId !== null);
+  if (usable.length < items.length) {
+    console.warn(`[denticon] patient ${patientId}: ${items.length - usable.length} treatment plan items without treatPlanId skipped`);
+  }
+  const byPlan = groupTreatmentPlanItems(usable);
   for (const [treatPlanId, planItems] of byPlan) {
     const lastChanged = planItems
       .map((i) => i.lastChangedOn ?? i.modifiedOn ?? i.createdOn ?? null)

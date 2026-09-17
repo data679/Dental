@@ -32,10 +32,16 @@ export async function syncPatientsForOffice(
   try {
     for (const w of windows) {
       let inWindow = 0;
+      let skipped = 0;
       for await (const p of client.listPatients({
         OfficeId: opts.officeId,
         LastChangedOn: { DateFrom: toDenticonDateTime(w.from), DateTo: toDenticonDateTime(w.to) },
       })) {
+        // No id → nothing to key on; it would land as denticon_patient_id "undefined".
+        if (p.patientId === undefined || p.patientId === null) {
+          skipped += 1;
+          continue;
+        }
         await pool.query(
           `INSERT INTO staging_denticon_patients (raw, denticon_patient_id, office_id, last_changed_on)
            VALUES ($1, $2, $3, $4)
@@ -52,7 +58,7 @@ export async function syncPatientsForOffice(
       total += inWindow;
       await setWatermark("patients", opts.officeId, w.to);
       console.log(
-        `[denticon] patients office=${opts.officeId} ${w.from.toISOString().slice(0, 10)}..${w.to.toISOString().slice(0, 10)}: ${inWindow} rows`,
+        `[denticon] patients office=${opts.officeId} ${w.from.toISOString().slice(0, 10)}..${w.to.toISOString().slice(0, 10)}: ${inWindow} rows${skipped ? ` (${skipped} skipped: no patientId)` : ""}`,
       );
     }
     await recordRun("patients", opts.officeId, { status: "ok", rows: total });

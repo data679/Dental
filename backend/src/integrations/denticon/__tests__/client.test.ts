@@ -114,3 +114,47 @@ describe("DenticonClient", () => {
     expect(() => client.listTreatmentPlans({ OfficeId: 1 })).toThrow(/requires/);
   });
 });
+
+describe("DenticonClient edge cases", () => {
+  it("treats a null/missing data array and zero pages as an empty result, not a crash", async () => {
+    const { fetchImpl } = fakeFetch([
+      { status: 200, body: { data: null, pageNumber: 1, pageSize: 50, pageCount: 0, totalCount: 0, totalPages: 0 } },
+      { status: 200, body: {} },
+    ]);
+    const client = new DenticonClient({ subscriptionKey: "k", fetch: fetchImpl, sleep: noSleep, logger: quiet });
+    const a = []; for await (const r of client.listOffices()) a.push(r);
+    const b = []; for await (const r of client.listProviders()) b.push(r);
+    expect(a).toEqual([]);
+    expect(b).toEqual([]);
+  });
+
+  it("gives up after maxRetries on persistent 5xx and surfaces the last status", async () => {
+    const { fetchImpl, calls } = fakeFetch([{ status: 503 }, { status: 503 }, { status: 503 }]);
+    const client = new DenticonClient({ subscriptionKey: "k", fetch: fetchImpl, sleep: noSleep, logger: quiet, maxRetries: 2 });
+    await expect(client.getPractice()).rejects.toMatchObject({ status: 503 });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("does not retry a 400/401/403/404", async () => {
+    for (const status of [400, 401, 403, 404]) {
+      const { fetchImpl, calls } = fakeFetch([{ status, body: { title: "x", status } }]);
+      const client = new DenticonClient({ subscriptionKey: "k", fetch: fetchImpl, sleep: noSleep, logger: quiet });
+      await expect(client.getPractice()).rejects.toMatchObject({ status });
+      expect(calls).toHaveLength(1);
+    }
+  });
+
+  it("survives a non-JSON body", async () => {
+    const fetchImpl = vi.fn(async () => new Response("<html>gateway timeout</html>", { status: 504 })) as unknown as typeof fetch;
+    const client = new DenticonClient({ subscriptionKey: "k", fetch: fetchImpl, sleep: noSleep, logger: quiet, maxRetries: 0 });
+    await expect(client.getPractice()).rejects.toMatchObject({ status: 504, message: expect.stringMatching(/gateway timeout/) });
+  });
+
+  it("caps an absurd Retry-After at 5 minutes", async () => {
+    const { fetchImpl } = fakeFetch([{ status: 429, headers: { "retry-after": "86400" } }, { status: 200, body: { data: {} } }]);
+    const sleep = vi.fn(async () => {});
+    const client = new DenticonClient({ subscriptionKey: "k", fetch: fetchImpl, sleep, logger: quiet });
+    await client.getPractice();
+    expect(sleep).toHaveBeenCalledWith(300_000);
+  });
+});

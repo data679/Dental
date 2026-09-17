@@ -13,8 +13,8 @@ import type { FunnelStageSummary } from "../lib/api";
 const STAGE_LABELS: Record<FunnelStageSummary["stage"], string> = {
   new_patients: "New patients",
   treatment_presented: "Treatment presented",
-  applications_submitted: "Application submitted",
-  applications_approved: "Application approved",
+  applications_submitted: "Financing requested",
+  applications_approved: "Approved by a lender",
   funded: "Funded",
   treatment_completed: "Treatment completed",
 };

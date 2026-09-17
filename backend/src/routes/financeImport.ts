@@ -3,7 +3,7 @@ import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { CANONICAL_COLUMNS } from "../etl/financing/columns.js";
 import { toCsvLine } from "../etl/financing/csv.js";
-import { ImportValidationError, importFinancingCsv, rematchUnmatchedApplications } from "../etl/financing/importService.js";
+import { ImportValidationError, importFinancingCsv, rebuildCases, rematchUnmatchedApplications } from "../etl/financing/importService.js";
 
 // Financing CSV intake endpoints, mounted under /api/finance. Unauthenticated until Auth0
 // lands (same as everything else) — gate these first, they write data.
@@ -29,6 +29,8 @@ financeImportRouter.get("/import/template", (_req, res) => {
     patient_first_name: "Jane",
     patient_last_name: "Doe",
     patient_dob: "1985-04-12",
+    case_id: "REQ-777",
+    inquiry_type: "soft",
   };
   const body = [toCsvLine([...CANONICAL_COLUMNS]), toCsvLine(CANONICAL_COLUMNS.map((c) => example[c]))].join("\n") + "\n";
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -77,7 +79,7 @@ financeImportRouter.post("/import", text({ type: ["text/csv", "text/plain"], lim
 financeImportRouter.get("/imports", async (_req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, source_file, imported_by, imported_at, row_count, inserted, updated, unmatched, rejected, errors
+      `SELECT id, source_file, imported_by, imported_at, row_count, inserted, updated, unmatched, duplicates, rejected, errors, warnings
          FROM financing_import_batches ORDER BY imported_at DESC LIMIT 50`,
     );
     res.json({ imports: rows });
@@ -104,6 +106,40 @@ financeImportRouter.get("/imports/:id/rows", async (req, res, next) => {
 financeImportRouter.post("/rematch", async (_req, res, next) => {
   try {
     res.json(await rematchUnmatchedApplications());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/finance/cases/rebuild — regroup every application into cases from scratch
+// (after changing FINANCING_CASE_WINDOW_DAYS, or once after upgrading to cases).
+financeImportRouter.post("/cases/rebuild", async (_req, res, next) => {
+  try {
+    res.json(await rebuildCases());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/finance/cases — one row per case with its outcome, newest first (for review).
+financeImportRouter.get("/cases", async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.query.limit ?? 200) || 200, 1000);
+    const { rows } = await pool.query(
+      `SELECT cs.case_id, cs.opened_date::text AS opened_date, cs.outcome, cs.applications, cs.lenders, cs.approvals,
+              cs.declines, cs.pending, cs.funded, cs.chosen_lender, cs.best_approved_amount, cs.funded_amount,
+              l.name AS location, p.denticon_patient_id,
+              (SELECT json_agg(json_build_object('lender', fa.lender, 'status', fa.status, 'inquiry', fa.inquiry_type,
+                       'approved', fa.approved_amount, 'submitted', fa.submitted_date) ORDER BY fa.submitted_date, fa.id)
+                 FROM financing_applications fa WHERE fa.case_id = cs.case_id) AS applications_detail
+         FROM financing_case_summary cs
+         LEFT JOIN locations l ON l.id = cs.location_id
+         LEFT JOIN patients p ON p.id = cs.patient_id
+        ORDER BY cs.opened_date DESC NULLS LAST, cs.case_id DESC
+        LIMIT $1`,
+      [limit],
+    );
+    res.json({ cases: rows });
   } catch (err) {
     next(err);
   }

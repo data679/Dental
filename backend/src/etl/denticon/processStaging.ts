@@ -7,6 +7,7 @@ import {
 } from "../../integrations/denticon/index.js";
 import type { ReferenceData } from "./syncReference.js";
 import { rematchUnmatchedApplications } from "../financing/importService.js";
+import { nameKey } from "../financing/columns.js";
 
 // Staging → core. Runs after landing so the dashboard queries (which only read the core
 // tables) see Denticon data. Idempotent: keyed on denticon_* ids, and a staging row is
@@ -53,8 +54,8 @@ async function processPatients(ref: ReferenceData): Promise<number> {
       await client.query("BEGIN");
       await client.query(
         `INSERT INTO patients (denticon_patient_id, location_id, provider_id, source, first_visit_date, active,
-                               first_name, last_name, birth_date, chart_no)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                               first_name, last_name, birth_date, chart_no, first_name_key, last_name_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (denticon_patient_id) DO UPDATE SET
            location_id = EXCLUDED.location_id,
            provider_id = EXCLUDED.provider_id,
@@ -65,9 +66,11 @@ async function processPatients(ref: ReferenceData): Promise<number> {
            last_name = EXCLUDED.last_name,
            birth_date = EXCLUDED.birth_date,
            chart_no = EXCLUDED.chart_no,
+           first_name_key = EXCLUDED.first_name_key,
+           last_name_key = EXCLUDED.last_name_key,
            updated_at = now()`,
         [m.denticonPatientId, locationId, providerId, source, m.firstVisitDate, row.raw.active !== false,
-         m.firstName, m.lastName, m.birthDate, m.chartNo],
+         m.firstName, m.lastName, m.birthDate, m.chartNo, nameKey(m.firstName), nameKey(m.lastName)],
       );
       await client.query("UPDATE staging_denticon_patients SET processed_at = now() WHERE id = $1", [row.id]);
       await client.query("COMMIT");

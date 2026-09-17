@@ -20,6 +20,13 @@ export interface FunnelFilters {
 export interface FunnelSummaryResponse {
   filters: FunnelFilters;
   stages: FunnelStageSummary[];
+  /** How the financing stages were built: cases (one patient's round) vs raw application rows. */
+  financing: {
+    cases: number;
+    applications: number;
+    multiLenderCases: number;
+    avgLendersPerCase: number | null;
+  };
 }
 
 export type Lender =
@@ -63,6 +70,18 @@ export interface LenderRate {
   count: number;
 }
 
+export interface MultiLenderSummary {
+  cases: number;
+  multiLenderCases: number;
+  avgLendersPerCase: number | null;
+  casesApproved: number;
+  casesWithMultipleApprovals: number;
+  casesFunded: number;
+  casesFundedFromMultipleApprovals: number;
+  inquiries: { soft: number; hard: number; unknown: number };
+  chosenLenderWhenMultiApproved: Array<{ lender: Lender; offered: number; chosen: number; winRate: number | null }>;
+}
+
 export interface FinanceSummary {
   filters: FinanceFilters;
   newPatients: PeriodStat;
@@ -70,12 +89,20 @@ export interface FinanceSummary {
   pctNewPatientsApplying: { current: number | null; prior: number | null };
   applicationsByLender: LenderCount[];
   approvalRateByLender: LenderRate[];
+  multiLender: MultiLenderSummary;
 }
 
 export interface LocationOption {
   id: number;
   name: string;
 }
+
+/**
+ * Backend-free demo mode (GitHub Pages): summaries are computed in the browser from
+ * public/data/snapshot.json instead of fetched from /api. See staticApi.ts.
+ */
+export const STATIC_MODE = import.meta.env.VITE_STATIC_SNAPSHOT === "true";
+const staticApi = () => import("./staticApi");
 
 function toQueryString(params: object): string {
   const usp = new URLSearchParams();
@@ -90,18 +117,21 @@ function toQueryString(params: object): string {
 export async function getFunnelSummary(
   filters: FunnelFilters = {},
 ): Promise<FunnelSummaryResponse> {
+  if (STATIC_MODE) return (await staticApi()).getFunnelSummary(filters);
   const res = await fetch(`/api/funnel/summary?${toQueryString(filters)}`);
   if (!res.ok) throw new Error(`Failed to load funnel summary: ${res.status}`);
   return res.json();
 }
 
 export async function getFinanceSummary(filters: FinanceFilters = {}): Promise<FinanceSummary> {
+  if (STATIC_MODE) return (await staticApi()).getFinanceSummary(filters);
   const res = await fetch(`/api/finance/summary?${toQueryString(filters)}`);
   if (!res.ok) throw new Error(`Failed to load finance summary: ${res.status}`);
   return res.json();
 }
 
 export async function getLocations(): Promise<LocationOption[]> {
+  if (STATIC_MODE) return (await staticApi()).getLocations();
   const res = await fetch("/api/locations");
   if (!res.ok) throw new Error(`Failed to load locations: ${res.status}`);
   const data = await res.json();
@@ -123,8 +153,11 @@ export interface ImportResult {
   inserted: number;
   updated: number;
   unmatched: number;
+  duplicates: number;
   rejected: number;
   errors: ImportRowError[];
+  warnings: ImportRowError[];
+  notes: string[];
   columnMap: Record<string, string | null>;
   unmappedHeaders: string[];
 }
@@ -146,8 +179,32 @@ export interface ImportBatch {
   inserted: number;
   updated: number;
   unmatched: number;
+  duplicates: number;
   rejected: number;
   errors: ImportRowError[];
+  warnings: ImportRowError[];
+}
+
+export interface DataQualityCheck {
+  id: string;
+  title: string;
+  severity: "error" | "warning" | "info";
+  hint: string;
+  count: number;
+  examples: Array<{ label: string; detail: string }>;
+}
+
+export interface DataQualityReport {
+  generatedAt: string;
+  summary: { errors: number; warnings: number };
+  checks: DataQualityCheck[];
+}
+
+export async function getDataQuality(): Promise<DataQualityReport> {
+  if (STATIC_MODE) return (await staticApi()).getDataQuality();
+  const res = await fetch("/api/data-quality");
+  if (!res.ok) throw new Error(`Failed to load data quality report: ${res.status}`);
+  return res.json();
 }
 
 export interface UnmatchedApplication {
@@ -165,6 +222,7 @@ export interface UnmatchedApplication {
 }
 
 export async function importFinancingCsv(file: File): Promise<ImportResult> {
+  if (STATIC_MODE) throw new Error("Importing is disabled in the demo — it needs the backend. Run the app locally (see README) to import a file.");
   const csv = await file.text();
   const res = await fetch(`/api/finance/import?sourceFile=${encodeURIComponent(file.name)}`, {
     method: "POST",
@@ -183,18 +241,21 @@ export async function importFinancingCsv(file: File): Promise<ImportResult> {
 }
 
 export async function getImportBatches(): Promise<ImportBatch[]> {
+  if (STATIC_MODE) return (await staticApi()).getImportBatches();
   const res = await fetch("/api/finance/imports");
   if (!res.ok) throw new Error(`Failed to load imports: ${res.status}`);
   return (await res.json()).imports;
 }
 
 export async function getUnmatchedApplications(): Promise<UnmatchedApplication[]> {
+  if (STATIC_MODE) return (await staticApi()).getUnmatchedApplications();
   const res = await fetch("/api/finance/unmatched");
   if (!res.ok) throw new Error(`Failed to load unmatched applications: ${res.status}`);
   return (await res.json()).unmatched;
 }
 
 export async function rematchApplications(): Promise<{ checked: number; matched: number }> {
+  if (STATIC_MODE) throw new Error("Re-matching is disabled in the demo — it needs the backend.");
   const res = await fetch("/api/finance/rematch", { method: "POST" });
   if (!res.ok) throw new Error(`Rematch failed: ${res.status}`);
   return res.json();
