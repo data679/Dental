@@ -2,7 +2,8 @@
 # The page computes its numbers in the browser from frontend/public/data/snapshot.json
 # (synthetic data; regenerate with `npm run snapshot` in backend/ and commit the file).
 #
-# One-time setup in the repo: Settings → Pages → Build and deployment → Source: "GitHub Actions".
+# The configure-pages step enables Pages (source: GitHub Actions) on first run, so no
+# manual repo setting is needed; it requires the repo to be public or on a paid plan.
 name: Deploy demo to GitHub Pages
 
 on:
@@ -27,6 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Enable GitHub Pages (idempotent)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
