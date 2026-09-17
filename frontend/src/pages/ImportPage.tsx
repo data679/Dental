@@ -2,17 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Text, Title } from "@tremor/react";
 import {
   getDataQuality,
+  getBcpStatus,
   getImportBatches,
   getUnmatchedApplications,
   importFinancingCsv,
   rematchApplications,
   type DataQualityReport,
+  type BcpStatus,
   type ImportBatch,
   type ImportResult,
   type UnmatchedApplication,
   STATIC_MODE,
 } from "../lib/api";
 import { DataQualityPanel } from "../components/DataQualityPanel";
+import { BcpFeedPanel } from "../components/BcpFeedPanel";
 
 // Manual intake for lender application exports. Upload → immediate per-row outcome →
 // history of past uploads → list of applications that couldn't be linked to a patient.
@@ -45,6 +48,7 @@ export function ImportPage() {
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [unmatched, setUnmatched] = useState<UnmatchedApplication[]>([]);
   const [quality, setQuality] = useState<DataQualityReport | null>(null);
+  const [bcp, setBcp] = useState<BcpStatus | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -52,6 +56,7 @@ export function ImportPage() {
     getImportBatches().then(setBatches).catch(() => undefined);
     getUnmatchedApplications().then(setUnmatched).catch(() => undefined);
     getDataQuality().then(setQuality).catch(() => undefined);
+    getBcpStatus().then(setBcp).catch(() => undefined);
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -266,6 +271,8 @@ export function ImportPage() {
           </div>
         )}
       </Card>
+
+      {bcp && <BcpFeedPanel status={bcp} />}
 
       {quality && <DataQualityPanel report={quality} onRefresh={() => getDataQuality().then(setQuality).catch(() => undefined)} />}
 

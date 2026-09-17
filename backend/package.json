@@ -18,6 +18,9 @@
     "denticon:samples": "tsx src/scripts/denticonSamples.ts",
     "financing:sample": "tsx src/scripts/financingSample.ts",
     "test:db": "node scripts/testDb.mjs",
+    "bcp:inspect": "tsx src/scripts/bcpInspect.ts",
+    "bcp:load": "tsx src/scripts/bcpLoad.ts",
+    "bcp:sample": "tsx src/scripts/bcpSample.ts",
     "snapshot": "tsx src/scripts/snapshot.ts",
     "snapshot:verify": "tsx scripts/verifySnapshotParity.mjs"
   },

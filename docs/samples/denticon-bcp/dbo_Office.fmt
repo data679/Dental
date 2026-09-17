@@ -1,0 +1,8 @@
+14.0
+6
+1  SQLCHAR  0  12   "\t"    1  OFCID       ""
+2  SQLCHAR  0  100  "\t"    2  OFCNAME     SQL_Latin1_General_CP1_CI_AS
+3  SQLCHAR  0  50   "\t"    3  CITY        SQL_Latin1_General_CP1_CI_AS
+4  SQLCHAR  0  2    "\t"    4  STATE       SQL_Latin1_General_CP1_CI_AS
+5  SQLCHAR  0  1    "\t"    5  ACTIVE      ""
+6  SQLCHAR  0  24   "\r\n"  6  CREATEDON   ""

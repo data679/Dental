@@ -42,6 +42,15 @@ const envSchema = z.object({
   // Applications for the same patient submitted within this many days of each other are
   // one financing case (a "multi-app" round). See docs/financing-intake.md.
   FINANCING_CASE_WINDOW_DAYS: z.coerce.number().int().min(0).max(365).default(14),
+  // Denticon "Data Download" (BCP) feed — see docs/denticon-bcp.md. The zip is AES
+  // encrypted with the requesting user's Denticon password. INBOX is a folder the worker
+  // polls for new zips; CONFIG is the optional bcp-feed.json with column names/mappings.
+  DENTICON_BCP_PASSWORD: blankToUndefined(z.string()),
+  DENTICON_BCP_INBOX: blankToUndefined(z.string()),
+  DENTICON_BCP_CONFIG: blankToUndefined(z.string()),
+  DENTICON_BCP_CRON: z.string().default("*/30 * * * *"),
+  // Data-quality check: warn when the last successful BCP load is older than this.
+  DENTICON_BCP_STALE_DAYS: z.coerce.number().int().positive().default(2),
 });
 
 // Fails fast with a clear message rather than letting a missing var surface later as a

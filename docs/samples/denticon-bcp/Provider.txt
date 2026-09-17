@@ -1,0 +1,14 @@
+PROVID|OFCID|FNAME|LNAME|TITLE|ACTIVE
+501|101|Wren|Sato|DDS|1
+502|101|Taylor|Garza|DMD|1
+503|101|Kendall|Singh|RDH|1
+504|101|Peyton|Alvarez|RDH|1
+505|102|Jordan|Jensen|DDS|1
+506|102|Kendall|Fitzgerald|DMD|1
+507|102|Remy|Okafor|RDH|1
+508|102|Marlow|Ueda|RDH|1
+509|103|Blake|Vasquez|DDS|1
+510|103|Wren|Okafor|DMD|1
+511|103|Arden|Okafor|RDH|1
+512|103|Quinn|Singh|RDH|1
+513|101|Former|Associate|DMD|0

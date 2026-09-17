@@ -26,4 +26,5 @@ const run = (cmd, args) => {
   if (r.status !== 0) process.exit(r.status ?? 1);
 };
 run("npx", ["tsx", "src/db/migrate.ts"]);
-run("npx", ["vitest", "run", ...process.argv.slice(2)]);
+// DB tests share one schema, so files must not run concurrently.
+run("npx", ["vitest", "run", "--no-file-parallelism", ...process.argv.slice(2)]);

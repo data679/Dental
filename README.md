@@ -29,7 +29,9 @@ questions still being nailed down.
 
 Primary data source is the practice management system (Denticon, via the PlanetDDS REST
 API, read-only) for patient/provider/location/treatment-plan data — see
-[docs/denticon-api.md](docs/denticon-api.md) for the integration. Financing application data
+[docs/denticon-api.md](docs/denticon-api.md) for the integration, and
+[docs/denticon-bcp.md](docs/denticon-bcp.md) for the alternative feed: the scheduled
+full-database "Denticon Download" (BCP) export, which needs no API key. Financing application data
 (submitted/approved/declined/funded, by lender) comes from lender CSV exports imported
 through the app — see [docs/financing-intake.md](docs/financing-intake.md) — until a
 direct lender API integration is worked out.
@@ -70,6 +72,22 @@ No key yet? `npm run denticon:mock` serves a synthetic practice group in the rea
 shapes on http://localhost:4900/denticon (key `mock-key`); example payloads are in
 [docs/samples/denticon](docs/samples/denticon/). See docs/denticon-api.md.
 
+### Denticon data download (BCP feed)
+
+The practice group already receives a scheduled full-database export from Denticon
+(Utilities → Denticon Download). The loader reads it without an API key:
+
+```bash
+npm run bcp:sample -- --zip                       # synthetic download for testing (password "sample")
+npm run bcp:inspect -- path/to/download.zip       # what's inside, no DB: delimiter, columns, adapter per table
+npm run bcp:load -- path/to/download.zip          # land + promote into the same tables the API sync uses
+curl localhost:4000/api/bcp/status
+```
+
+Set `DENTICON_BCP_PASSWORD` (the zip password) and, for the schedule, `DENTICON_BCP_INBOX`
+so the worker sweeps the drop folder. Column names for headerless files go in
+`backend/bcp-feed.json`. See [docs/denticon-bcp.md](docs/denticon-bcp.md).
+
 ### Financing data (lender CSV imports)
 
 Lender application exports are imported from the dashboard's **Import Financing Data**
@@ -107,7 +125,8 @@ Early scaffold — schema and API match the storyboard's step 1 ("nail the data 
 down"). The Denticon integration is built and tested against the published API contract
 (client, incremental sync into staging, staging → core processing, funnel stages for
 treatment presented/completed) but runs no-op until a PlanetDDS subscription key is
-issued. The financing half of the funnel is fed by CSV import of lender exports
+issued. A second Denticon feed — the scheduled BCP data download — has a loader ready
+(docs/denticon-bcp.md) and is waiting on the first real file. The financing half of the funnel is fed by CSV import of lender exports
 (docs/financing-intake.md). See docs/data-model.md for what's still open.
 
 ## Credentials

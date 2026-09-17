@@ -1,0 +1,9 @@
+REFCODE	REFDESC
+WEB	Website / Online Booking
+GOOG	Google Ads
+SOC	Social Media
+PTREF	Patient Referral
+INS	Insurance Directory
+WALK	Walk-in
+ORTHO	Ortho Referral
+MAIL	Direct Mail

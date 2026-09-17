@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { pool } from "../db/pool.js";
+import { env } from "../config/env.js";
 
 // GET /api/data-quality — one place that lists what's duplicated or missing across the
 // warehouse, regardless of which source it came from. Each check returns a count and a
@@ -132,6 +133,39 @@ const CHECKS: Check[] = [
             FROM staging_denticon_treatment_plans WHERE processed_at IS NULL
           UNION ALL
           SELECT 'patient ' || denticon_patient_id, 'unprocessed' FROM staging_denticon_patients WHERE processed_at IS NULL`,
+  },
+  {
+    id: "bcp_feed_stale",
+    title: "Denticon data download (BCP) feed is stale",
+    severity: "warning",
+    hint: `No successful BCP load in the last ${env.DENTICON_BCP_STALE_DAYS} day(s). Check the inbox folder, the zip password, and the last load's error via GET /api/bcp/loads. Silent when the feed has never been loaded.`,
+    // DENTICON_BCP_STALE_DAYS is zod-validated as a positive integer, so it's safe to inline.
+    sql: `SELECT 'last successful load #' || id AS label,
+                 to_char(finished_at, 'YYYY-MM-DD HH24:MI') || ' (' || coalesce(file_name, source) || ')' AS detail
+            FROM bcp_loads
+           WHERE status = 'ok'
+             AND NOT EXISTS (SELECT 1 FROM bcp_loads WHERE status = 'ok'
+                              AND finished_at >= now() - interval '${env.DENTICON_BCP_STALE_DAYS} days')
+           ORDER BY finished_at DESC LIMIT 1`,
+  },
+  {
+    id: "bcp_failed_loads",
+    title: "BCP loads that failed",
+    severity: "error",
+    hint: "The most recent loads that ended in an error (wrong password, unreadable zip, database error). Fix and re-run `npm run bcp:load`; nothing partial is promoted from a failed load.",
+    sql: `SELECT 'load #' || id || ' · ' || coalesce(file_name, source) AS label, left(error, 200) AS detail
+            FROM bcp_loads WHERE status = 'error' AND started_at > now() - interval '14 days'
+           ORDER BY started_at DESC`,
+  },
+  {
+    id: "bcp_unmapped_tables",
+    title: "BCP tables landed but not promoted",
+    severity: "info",
+    hint: "Files in the latest download we have no adapter or column names for. They're kept raw in staging_bcp_rows; add columns/map entries to bcp-feed.json (see docs/denticon-bcp.md) to bring them into the dashboard.",
+    sql: `SELECT t->>'table' AS label, coalesce(t->>'blocked', '') || ' · ' || (t->>'rows') || ' rows' AS detail
+            FROM (SELECT tables FROM bcp_loads WHERE status = 'ok' ORDER BY finished_at DESC LIMIT 1) l,
+                 jsonb_array_elements(l.tables) t
+           WHERE (t->>'ignored')::boolean = false AND t->>'blocked' IS NOT NULL`,
   },
 ];
 

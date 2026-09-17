@@ -1,0 +1,25 @@
+{
+  "tables": {
+    "patient_master": {
+      "entity": "patients",
+      "columns": [
+        "PATID",
+        "OFCID",
+        "CHARTNO",
+        "LNAME",
+        "FNAME",
+        "DOB",
+        "SEX",
+        "ACTIVE",
+        "FIRSTVISIT",
+        "LASTVISIT",
+        "REFTYPE",
+        "PROVID",
+        "MODDATE"
+      ]
+    },
+    "ledger": {
+      "ignore": false
+    }
+  }
+}

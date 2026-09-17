@@ -10,3 +10,6 @@ coverage/
 .vscode/
 .idea/
 *.tsbuildinfo
+
+# Per-practice-group BCP column mapping; see docs/denticon-bcp.md
+backend/bcp-feed.json

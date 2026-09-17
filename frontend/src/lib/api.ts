@@ -260,3 +260,27 @@ export async function rematchApplications(): Promise<{ checked: number; matched:
   if (!res.ok) throw new Error(`Rematch failed: ${res.status}`);
   return res.json();
 }
+
+// ---- Denticon data download (BCP) feed ----------------------------------------------
+
+export interface BcpStatus {
+  configured: boolean;
+  inbox: string | null;
+  pendingFiles: string[];
+  lastLoad: {
+    id: number;
+    fileName: string | null;
+    finishedAt: string;
+    stale: boolean;
+    tables: Array<{ table: string; entity: string | null; rows: number; inserted: number; blocked: string | null }>;
+  } | null;
+  lastError: { id: number; fileName: string | null; at: string; error: string } | null;
+  staging: Array<{ table: string; total: number; unprocessed: number }>;
+}
+
+export async function getBcpStatus(): Promise<BcpStatus | null> {
+  if (STATIC_MODE) return null;
+  const res = await fetch("/api/bcp/status");
+  if (!res.ok) throw new Error(`Failed to load BCP feed status: ${res.status}`);
+  return res.json();
+}
