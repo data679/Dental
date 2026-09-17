@@ -1,0 +1,41 @@
+# Backend unit tests + typechecks on every push/PR. (DB-backed tests run locally via
+# `npm run test:db`; they need Postgres and are not wired into CI yet.)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - working-directory: backend
+        run: npm ci
+      - working-directory: backend
+        run: npm run typecheck
+      - working-directory: backend
+        env:
+          DATABASE_URL: postgres://unused
+          REDIS_URL: redis://unused
+        run: npm test
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - working-directory: frontend
+        run: npx tsc -p tsconfig.json --noEmit
