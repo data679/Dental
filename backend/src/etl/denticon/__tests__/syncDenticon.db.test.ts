@@ -49,9 +49,16 @@ d("syncDenticon job (database + mock server)", () => {
         { entity: "reference", office_id: 0, last_run_status: "ok" },
       ]),
     );
-    const { rows: [p] } = await pool.query("SELECT count(*)::int AS n, count(*) FILTER (WHERE denticon_patient_id = 'undefined')::int AS bad FROM patients");
+    const { rows: [p] } = await pool.query(
+      `SELECT count(*)::int AS n, count(*) FILTER (WHERE denticon_patient_id = 'undefined')::int AS bad,
+              count(*) FILTER (WHERE new_patient_flag)::int AS new_patients,
+              count(*) FILTER (WHERE first_visit_date IS NOT NULL)::int AS with_first_visit
+         FROM patients`,
+    );
     expect(p.n).toBeGreaterThan(0);
     expect(p.bad).toBe(0);
+    expect(p.new_patients).toBe(p.with_first_visit); // flag is derived from the first visit, nothing else
+    expect(p.new_patients).toBeLessThan(p.n); // the mock has booked-but-never-seen patients
     const { rows: [tp] } = await pool.query("SELECT count(*)::int AS n, count(*) FILTER (WHERE denticon_treat_plan_id IS NULL)::int AS bad FROM staging_denticon_treatment_plans");
     expect(tp.n).toBeGreaterThan(0);
     expect(tp.bad).toBe(0);

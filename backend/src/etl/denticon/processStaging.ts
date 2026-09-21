@@ -14,9 +14,9 @@ import { nameKey } from "../financing/columns.js";
 // only stamped processed_at once its core row exists.
 //
 // Deliberately conservative where docs/data-model.md still has open questions:
-//  - patients.new_patient_flag is left at its DB default on insert and untouched on update
-//    ("what counts as a new patient" isn't settled — first_visit_date is stored so any
-//    definition can be derived later).
+//  - patients.new_patient_flag is a generated column (migration 0009): true once the
+//    patient has a first_visit_date. Decision: booked-but-never-seen patients are not new
+//    patients. Nothing here writes the flag.
 //  - treatment_plans.status uses the mapping in integrations/denticon/mapping.ts.
 
 export interface ProcessResult {

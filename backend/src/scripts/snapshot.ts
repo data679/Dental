@@ -56,14 +56,14 @@ const snapshot = {
             cs.chosen_lender,
             (SELECT array_agg(DISTINCT fa.lender::text) FROM financing_applications fa WHERE fa.case_id = cs.case_id) AS lender_list,
             (SELECT array_agg(DISTINCT fa.lender::text) FROM financing_applications fa WHERE fa.case_id = cs.case_id AND fa.status = 'approved') AS approved_lenders,
-            (SELECT bool_or(p.new_patient_flag) FROM patients p WHERE p.id = cs.patient_id) AS new_patient
+            (SELECT p.first_visit_date::text FROM patients p WHERE p.id = cs.patient_id) AS patient_first_visit_date
        FROM financing_case_summary cs ORDER BY cs.case_id`,
   ),
   applications: await q(
     `SELECT fa.id::int, fa.case_id::int, fa.lender::text, fa.application_type::text, fa.status::text,
             fa.submitted_date::text, fa.decision_date::text, fa.approved_amount::float,
             COALESCE(fa.location_id, p.location_id)::int AS location_id, fa.patient_id::int, fa.inquiry_type,
-            p.new_patient_flag AS new_patient
+            p.first_visit_date::text AS patient_first_visit_date
        FROM financing_applications fa LEFT JOIN patients p ON p.id = fa.patient_id ORDER BY fa.id`,
   ),
   fundings: await q("SELECT application_id::int, funded_date::text, funded_amount::float, utilization_pct::float FROM fundings"),

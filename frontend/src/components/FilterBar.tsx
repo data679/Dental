@@ -124,7 +124,9 @@ export function FilterBar({ filters, locations, onChange }: FilterBarProps) {
       </div>
 
       <div className="col-span-2 sm:col-span-1">
-        <label className="mb-1 block text-xs font-medium text-gray-500">Patient Type</label>
+        <label className="mb-1 block text-xs font-medium text-gray-500" title="New Patients = patients whose first completed visit falls inside the selected date range. A booked appointment alone doesn't count.">
+          Patient Type
+        </label>
         <div className="inline-flex rounded-md border border-gray-300 bg-gray-50 p-0.5">
           {(
             [

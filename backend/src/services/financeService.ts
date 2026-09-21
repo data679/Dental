@@ -9,6 +9,13 @@ import type {
   PeriodStat,
 } from "../types/domain.js";
 
+// "New patient" = completed a first visit (patients.new_patient_flag is generated from
+// first_visit_date, migration 0009). "New in this period" = that first visit falls inside
+// the report's date range — which is what the Patient Type → New Patients toggle means for
+// the lender charts: applications from patients who became patients during the period.
+// $1/$2 are always the period bounds in the queries that use this.
+const NEW_IN_PERIOD = "p.first_visit_date >= $1 AND p.first_visit_date <= $2";
+
 // Defaults to the last 30 days when no range is given, so there's always a well-defined
 // "prior period" (the same-length window immediately before it) to compare against.
 function resolveDateRange(filters: FinanceFilters): { from: string; to: string } {
@@ -55,9 +62,7 @@ async function countPatients(
     params.push(filters.locationId);
     clauses.push(`p.location_id = $${params.length}`);
   }
-  if (filters.newPatientsOnly) {
-    clauses.push("p.new_patient_flag = true");
-  }
+  // newPatientsOnly is implied: both tiles already count patients by first visit in range.
 
   const join = requireApplication
     ? "JOIN financing_applications fa ON fa.patient_id = p.id"
@@ -102,9 +107,7 @@ async function applicationsByLender(range: Range, filters: FinanceFilters): Prom
     params.push(filters.status);
     clauses.push(`fa.status = $${params.length}`);
   }
-  if (filters.newPatientsOnly) {
-    clauses.push("p.new_patient_flag = true");
-  }
+  if (filters.newPatientsOnly) clauses.push(NEW_IN_PERIOD);
 
   const { rows } = await pool.query<{ lender: LenderCount["lender"]; count: string }>(
     `SELECT fa.lender, count(*)::text AS count
@@ -135,9 +138,7 @@ async function approvalRateByLender(range: Range, filters: FinanceFilters): Prom
     params.push(filters.applicationType);
     clauses.push(`fa.application_type = $${params.length}`);
   }
-  if (filters.newPatientsOnly) {
-    clauses.push("p.new_patient_flag = true");
-  }
+  if (filters.newPatientsOnly) clauses.push(NEW_IN_PERIOD);
 
   const { rows } = await pool.query<{ lender: LenderRate["lender"]; approved: string; total: string }>(
     `SELECT fa.lender,
@@ -168,7 +169,7 @@ async function multiLenderSummary(range: Range, filters: FinanceFilters): Promis
     clauses.push(`cs.location_id = $${params.length}`);
   }
   if (filters.newPatientsOnly) {
-    clauses.push("EXISTS (SELECT 1 FROM patients p WHERE p.id = cs.patient_id AND p.new_patient_flag)");
+    clauses.push("EXISTS (SELECT 1 FROM patients p WHERE p.id = cs.patient_id AND p.first_visit_date >= $1 AND p.first_visit_date <= $2)");
   }
   const where = `WHERE ${clauses.join(" AND ")}`;
 

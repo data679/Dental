@@ -82,8 +82,13 @@ anywhere in this repo, in seed data, or in logs — synthetic data only.
 
 ## Open questions (from the storyboard — unresolved)
 
-1. **What exactly counts as a "new patient"?** Walk-in vs. booked vs. first-visit-completed
-   — these can disagree with each other and change the denominator for every funnel metric.
+1. ~~**What exactly counts as a "new patient"?**~~ **Decided 2026-09-21: a completed first
+   visit.** A booked appointment doesn't count — no-shows never become patients. Implemented
+   as a generated column (`patients.new_patient_flag = first_visit_date IS NOT NULL`,
+   migration 0009); "new in a period" = first visit inside the report's date range, which
+   is what the New Patients tiles and the Patient Type toggle use. The other candidate
+   signals (chart created, patient type code, appointment `isNewPatient`) stay available in
+   staging `raw` if this is ever revisited.
 2. **How granular does application status need to be?** Storyboard lists
    submitted/pending/approved/declined, but flags that "in review" or "expired" might also be
    needed. Affects the `financing_applications.status` enum below.

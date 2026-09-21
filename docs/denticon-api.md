@@ -93,9 +93,10 @@ Denticon `treatPlanStatus` → `treatment_plans.status`:
 | `U`, `R` | Unaccepted, Referred out | `declined` |
 | `D`, `H`, `L`, other | Diagnosed, Hold, Alternative | `presented` |
 
-`patients.new_patient_flag` is **not** derived from Denticon yet — "what counts as a new
-patient" is still open in `data-model.md`. `first_visit_date`, `createdOn` (in staging
-`raw`) and `patientTypeCode` are all available to build whatever definition is agreed.
+`patients.new_patient_flag` is derived from `firstVisitDate` only (decided 2026-09-21: a
+new patient is one who completed a first visit; booked/no-show patients are not). It is a
+generated column, so neither feed writes it. `createdOn` and `patientTypeCode` remain in
+staging `raw` if the definition is revisited.
 
 ## Sample data and mock server (no key needed)
 
@@ -132,8 +133,9 @@ is available two ways:
 
 ### Candidate "new patient" signals in the API
 
-Open question 1 in `data-model.md` can be answered from any of these, all captured by
-the sync (patients in staging `raw`; appointments typed but not yet synced):
+Decided: `firstVisitDate` (see `data-model.md`). Kept for reference — the alternatives
+considered, all captured by the sync (patients in staging `raw`; appointments typed but
+not yet synced):
 
 | Signal | Where | Meaning |
 |---|---|---|

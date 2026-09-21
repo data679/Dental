@@ -371,3 +371,44 @@ d("multi-lender cases (database)", () => {
     expect(rows[0]!.case_key).toMatch(/^patient:/);
   });
 });
+
+d("new-patient definition (database)", () => {
+  let getFinanceSummary: typeof import("../../../services/financeService.js").getFinanceSummary;
+  beforeAll(async () => {
+    ({ getFinanceSummary } = await import("../../../services/financeService.js"));
+  });
+
+  it("derives the flag from a completed first visit only — booked/no-show patients are not new patients", async () => {
+    await pool.query(`TRUNCATE fundings, financing_applications, financing_cases, staging_financing_csv, financing_import_batches, patients RESTART IDENTITY CASCADE`);
+    await pool.query(`
+      INSERT INTO patients (denticon_patient_id, location_id, first_name, last_name, birth_date, first_name_key, last_name_key, first_visit_date) VALUES
+        ('1', 1, 'Seen', 'InPeriod', '1980-01-01', 'seen', 'inperiod', '2026-09-05'),
+        ('2', 1, 'Seen', 'Earlier',  '1980-01-01', 'seen', 'earlier',  '2025-01-15'),
+        ('3', 1, 'Booked', 'NoShow', '1980-01-01', 'booked', 'noshow', NULL)`);
+    const { rows } = await pool.query("SELECT denticon_patient_id AS id, new_patient_flag AS flag FROM patients ORDER BY 1");
+    expect(rows).toEqual([{ id: "1", flag: true }, { id: "2", flag: true }, { id: "3", flag: false }]);
+    // The column is generated: nobody can set it by hand.
+    await expect(pool.query("UPDATE patients SET new_patient_flag = true WHERE denticon_patient_id = '3'")).rejects.toThrow(/can only be updated to DEFAULT/);
+
+    // Applications from all three in September; Patient Type = New Patients keeps only the
+    // patient whose first visit is inside the report range.
+    await importFinancingCsv({
+      csvText: csv(
+        "Application ID,Lender,Status,Application Date,Last Name,DOB",
+        "A,Cherry,Approved,9/10/2026,InPeriod,1/1/1980",
+        "B,Cherry,Approved,9/11/2026,Earlier,1/1/1980",
+        "C,Cherry,Declined,9/12/2026,NoShow,1/1/1980",
+      ),
+      sourceFile: "np.csv",
+    });
+    const all = await getFinanceSummary({ dateFrom: "2026-09-01", dateTo: "2026-09-30" });
+    expect(all.applicationsByLender).toEqual([{ lender: "cherry", count: 3 }]);
+    expect(all.newPatients.current).toBe(1);
+    expect(all.newPatientsApplying.current).toBe(1);
+
+    const np = await getFinanceSummary({ dateFrom: "2026-09-01", dateTo: "2026-09-30", newPatientsOnly: true });
+    expect(np.applicationsByLender).toEqual([{ lender: "cherry", count: 1 }]);
+    expect(np.approvalRateByLender).toEqual([{ lender: "cherry", count: 1, rate: 100 }]);
+    expect(np.multiLender.cases).toBe(1);
+  });
+});

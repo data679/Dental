@@ -88,8 +88,8 @@ async function seed() {
 
       await client.query(
         `INSERT INTO patients
-           (denticon_patient_id, location_id, provider_id, source, new_patient_flag, first_visit_date)
-         VALUES ($1, $2, $3, $4, true, $5)`,
+           (denticon_patient_id, location_id, provider_id, source, first_visit_date)
+         VALUES ($1, $2, $3, $4, $5)`,
         [denticonId, location, provider, source, firstVisit],
       );
     }

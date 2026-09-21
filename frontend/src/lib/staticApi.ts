@@ -26,12 +26,12 @@ interface Snapshot {
   cases: Array<{
     id: number; patient_id: number | null; location_id: number | null; provider_id: number | null; opened_date: string | null;
     applications: number; lenders: number; approvals: number; declines: number; pending: number; funded: boolean;
-    chosen_lender: Lender | null; lender_list: Lender[] | null; approved_lenders: Lender[] | null; new_patient: boolean | null;
+    chosen_lender: Lender | null; lender_list: Lender[] | null; approved_lenders: Lender[] | null; patient_first_visit_date: string | null;
   }>;
   applications: Array<{
     id: number; case_id: number | null; lender: Lender; application_type: "primary" | "subprime"; status: string;
     submitted_date: string | null; decision_date: string | null; approved_amount: number | null; location_id: number | null;
-    patient_id: number | null; inquiry_type: "soft" | "hard" | null; new_patient: boolean | null;
+    patient_id: number | null; inquiry_type: "soft" | "hard" | null; patient_first_visit_date: string | null;
   }>;
   fundings: Array<{ application_id: number; funded_date: string | null; funded_amount: number | null }>;
   imports: ImportBatch[];
@@ -124,12 +124,13 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
   const current = resolveRange(f);
   const prior = priorPeriod(current.from, current.to);
 
+  // Mirrors financeService.ts: "new in period" = first visit inside the report range.
+  const newInPeriod = (firstVisit: string | null) => inRange(firstVisit, current.from, current.to);
   const countPatients = (r: { from: string; to: string }, requireApp: boolean) =>
     s.patients.filter(
       (p) =>
         inRange(p.first_visit_date, r.from, r.to) &&
         (f.locationId === undefined || p.location_id === f.locationId) &&
-        (!f.newPatientsOnly || p.new_patient_flag) &&
         (!requireApp || p.has_application),
     ).length;
   const stat = (requireApp: boolean) => {
@@ -143,7 +144,7 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
   const appOk = (a: Snapshot["applications"][number]) =>
     (f.locationId === undefined || a.location_id === f.locationId) &&
     (f.applicationType === undefined || a.application_type === f.applicationType) &&
-    (!f.newPatientsOnly || a.new_patient === true);
+    (!f.newPatientsOnly || newInPeriod(a.patient_first_visit_date));
 
   const byLender = new Map<Lender, number>();
   for (const a of s.applications) {
@@ -168,7 +169,7 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
     (c) =>
       inRange(c.opened_date, current.from, current.to) &&
       (f.locationId === undefined || c.location_id === f.locationId) &&
-      (!f.newPatientsOnly || c.new_patient === true),
+      (!f.newPatientsOnly || newInPeriod(c.patient_first_visit_date)),
   );
   const caseIds = new Set(cases.map((c) => c.id));
   const inquiries = { soft: 0, hard: 0, unknown: 0 };

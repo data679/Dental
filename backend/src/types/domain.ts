@@ -37,6 +37,7 @@ export interface Patient {
   locationId: number | null;
   providerId: number | null;
   source: string | null;
+  /** Derived in the DB: has completed a first visit. Booked/no-show patients are false. */
   newPatientFlag: boolean;
   firstVisitDate: string | null;
 }
@@ -108,7 +109,7 @@ export interface FinanceFilters {
   dateTo?: string;
   applicationType?: ApplicationType; // "Prime vs SubPrime"
   status?: ApplicationStatus; // "Status Filter"
-  newPatientsOnly?: boolean; // "Patient Type": All vs New Patients
+  newPatientsOnly?: boolean; // "Patient Type": All vs New Patients (first visit within the period)
 }
 
 export interface PeriodStat {
