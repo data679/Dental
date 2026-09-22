@@ -60,16 +60,33 @@ d("bcp loader (database)", () => {
     expect(r.status).toBe("ok");
     expect(r.error).toBeNull();
     const byTable = Object.fromEntries(r.tables.map((t) => [t.table, t]));
-    expect(byTable.patient_master).toMatchObject({ entity: "patients", blocked: null, rows: 420, inserted: 420, unchanged: 0 });
-    expect(byTable.office).toMatchObject({ entity: "offices", columnSource: "format-file", blocked: null, rows: 3 });
+    // Counts come from the fixture itself (regenerate it with `npm run bcp:sample` and
+    // these still hold) — what's asserted is the invariants: a first load inserts every
+    // row it read, each adapter table is promoted in full, and the unknown table is not.
+    expect(byTable.patient_master).toMatchObject({ entity: "patients", blocked: null, unchanged: 0 });
+    expect(byTable.patient_master.inserted).toBe(byTable.patient_master.rows);
+    expect(byTable.patient_master.rows).toBeGreaterThan(100);
+    expect(byTable.office).toMatchObject({ entity: "offices", columnSource: "format-file", blocked: null });
     expect(byTable.provider).toMatchObject({ entity: "providers", delimiter: "|", hasHeader: true });
     expect(byTable.ref_type).toMatchObject({ entity: "referral_types", hasHeader: true });
-    expect(byTable.treat_plan).toMatchObject({ entity: "treatment_plans", rows: 271 });
-    expect(byTable.treat_plan_detail).toMatchObject({ entity: "treatment_plan_items", rows: 765 });
-    expect(byTable.ledger).toMatchObject({ entity: null, blocked: expect.stringMatching(/no adapter/), rows: 50, inserted: 50 });
+    expect(byTable.treat_plan).toMatchObject({ entity: "treatment_plans" });
+    expect(byTable.treat_plan_detail).toMatchObject({ entity: "treatment_plan_items" });
+    expect(byTable.treat_plan_detail.rows).toBeGreaterThan(byTable.treat_plan.rows); // items are per-procedure
+    expect(byTable.ledger).toMatchObject({ entity: null, blocked: expect.stringMatching(/no adapter/) });
+    expect(byTable.ledger.inserted).toBe(byTable.ledger.rows);
     expect(byTable.readme).toBeUndefined();
-    expect(r.promoted).toMatchObject({ offices: 3, providers: 13, referralTypes: 8, patients: 420, treatmentPlans: 271 });
-    expect(r.promoted!.processed).toMatchObject({ patients: 420, treatmentPlans: 271, treatmentPlansDeferred: 0 });
+    expect(r.promoted).toMatchObject({
+      offices: byTable.office.rows,
+      providers: byTable.provider.rows,
+      referralTypes: byTable.ref_type.rows,
+      patients: byTable.patient_master.rows,
+      treatmentPlans: byTable.treat_plan.rows,
+    });
+    expect(r.promoted!.processed).toMatchObject({
+      patients: byTable.patient_master.rows,
+      treatmentPlans: byTable.treat_plan.rows,
+      treatmentPlansDeferred: 0,
+    });
 
     const { rows: [c] } = await pool.query(
       `SELECT (SELECT count(*) FROM patients)::int AS patients, (SELECT count(*) FROM treatment_plans)::int AS plans,
@@ -78,7 +95,14 @@ d("bcp loader (database)", () => {
               (SELECT count(*) FROM staging_bcp_rows WHERE processed_at IS NULL)::int AS raw_unprocessed,
               (SELECT count(*) FROM staging_denticon_patients WHERE source = 'bcp')::int AS bcp_staged`,
     );
-    expect(c).toMatchObject({ patients: 420, plans: 271, locations: 3, providers: 13, raw_unprocessed: 50, bcp_staged: 420 });
+    expect(c).toMatchObject({
+      patients: byTable.patient_master.rows,
+      plans: byTable.treat_plan.rows,
+      locations: byTable.office.rows,
+      providers: byTable.provider.rows,
+      raw_unprocessed: byTable.ledger.rows, // the table with no adapter stays raw
+      bcp_staged: byTable.patient_master.rows,
+    });
     expect(c.done).toBeGreaterThan(0);
 
     // Referral descriptions resolved through the ref_type table.
@@ -91,6 +115,7 @@ d("bcp loader (database)", () => {
 
   it("re-loading the same download is a no-op", async () => {
     const before = await coreSnapshot();
+    const firstLoad = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM staging_bcp_rows");
     const r = await loadFeed(sampleDir, { config, log: () => {} });
     expect(r.status).toBe("ok");
     expect(r.tables.filter((t) => !t.ignored).every((t) => t.inserted === 0 && t.unchanged === t.rows)).toBe(true);
@@ -98,7 +123,8 @@ d("bcp loader (database)", () => {
     expect(r.promoted!.processed).toMatchObject({ patients: 0, treatmentPlans: 0 });
     expect(await coreSnapshot()).toEqual(before);
     const { rows: [c] } = await pool.query("SELECT count(*)::int AS n FROM staging_bcp_rows");
-    expect(c.n).toBe(420 + 3 + 13 + 8 + 271 + 765 + 50);
+    expect(c.n).toBe(firstLoad.rows[0]!.n); // no duplicate raw rows
+    expect(c.n).toBe(r.tables.filter((t) => !t.ignored).reduce((n, t) => n + t.rows, 0));
   }, SLOW);
 
   it("tomorrow's dump: only changed rows land and only their entities are re-promoted", async () => {
@@ -108,6 +134,7 @@ d("bcp loader (database)", () => {
     const { cp } = await import("node:fs/promises");
     await cp(sampleDir, dir, { recursive: true });
 
+    const { rows: [before] } = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM patients");
     const pm = path.join(dir, "dbo_PatientMaster.txt");
     const lines = (await readFile(pm, "utf8")).split("\r\n");
     const target = lines[0]!.split("\t");
@@ -137,8 +164,10 @@ d("bcp loader (database)", () => {
     const r = await loadFeed(dir, { config, log: () => {} });
     expect(r.status).toBe("ok");
     const byTable = Object.fromEntries(r.tables.map((t) => [t.table, t]));
-    expect(byTable.patient_master).toMatchObject({ inserted: 1, unchanged: 419 });
-    expect(byTable.treat_plan_detail).toMatchObject({ inserted: openPlan[1].length, unchanged: 765 - openPlan[1].length });
+    expect(byTable.patient_master).toMatchObject({ inserted: 1 });
+    expect(byTable.patient_master.unchanged).toBe(byTable.patient_master.rows - 1);
+    expect(byTable.treat_plan_detail).toMatchObject({ inserted: openPlan[1].length });
+    expect(byTable.treat_plan_detail.unchanged).toBe(byTable.treat_plan_detail.rows - openPlan[1].length);
     expect(byTable.treat_plan).toMatchObject({ inserted: 0 });
     expect(r.promoted).toMatchObject({ patients: 1, treatmentPlans: 1 });
 
@@ -177,6 +206,7 @@ d("bcp loader (database)", () => {
     await rm(dir, { recursive: true, force: true });
     const { cp } = await import("node:fs/promises");
     await cp(sampleDir, dir, { recursive: true });
+    const { rows: [before] } = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM patients");
     const pm = path.join(dir, "dbo_PatientMaster.txt");
     await writeFile(pm, (await readFile(pm, "utf8")) + "notanid\t101\tX\tBad\tRow\t\t\t1\t\t\t\t\t\r\n");
     const r = await loadFeed(dir, { config, only: ["patient_master"], log: () => {} });
@@ -185,6 +215,6 @@ d("bcp loader (database)", () => {
     expect(r.tables.find((t) => t.table === "patient_master")).toMatchObject({ inserted: 1 });
     expect(r.promoted).toMatchObject({ patients: 0 });
     const { rows: [c] } = await pool.query("SELECT count(*)::int AS n FROM patients");
-    expect(c.n).toBe(420);
+    expect(c.n).toBe(before!.n); // the unpromoted bad row never reached the core table
   }, SLOW);
 });

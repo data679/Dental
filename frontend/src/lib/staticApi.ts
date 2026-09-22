@@ -9,6 +9,7 @@ import type {
   LenderOption,
   LocationOption,
   MultiLenderSummary,
+  PracticeRow,
   UnmatchedApplication,
 } from "./api";
 
@@ -137,13 +138,18 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
 
   // Mirrors financeService.ts: "new in period" = first visit inside the report range.
   const newInPeriod = (firstVisit: string | null) => inRange(firstVisit, current.from, current.to);
-  const countPatients = (r: { from: string; to: string }, requireApp: boolean) =>
-    s.patients.filter(
+  // The application must fall in the same period as the first visit (mirrors financeService.ts).
+  const appliedIn = (r: { from: string; to: string }) =>
+    new Set(s.applications.filter((a) => inRange(a.submitted_date, r.from, r.to) && a.patient_id !== null).map((a) => a.patient_id));
+  const countPatients = (r: { from: string; to: string }, requireApp: boolean) => {
+    const applied = requireApp ? appliedIn(r) : null;
+    return s.patients.filter(
       (p) =>
         inRange(p.first_visit_date, r.from, r.to) &&
         (f.locationId === undefined || p.location_id === f.locationId) &&
-        (!requireApp || p.has_application),
+        (!applied || applied.has(p.id)),
     ).length;
+  };
   const stat = (requireApp: boolean) => {
     const cur = countPatients(current, requireApp);
     const pri = countPatients(prior, requireApp);
@@ -212,6 +218,8 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
       .sort((a, b) => b.offered - a.offered || a.lender.localeCompare(b.lender)),
   };
 
+  const practiceRows = byPractice(s, current, f);
+
   return {
     filters: { ...f, dateFrom: current.from, dateTo: current.to },
     newPatients,
@@ -223,7 +231,83 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
     applicationsByLender,
     approvalRateByLender,
     multiLender,
+    byPractice: practiceRows,
+    byPracticeTotal: totalPracticeRow(practiceRows),
   };
+}
+
+// Mirrors byPractice()/buildPracticeRow() in backend/src/services/financeService.ts.
+// Kept in step by backend/scripts/verifySnapshotParity.mjs.
+function buildPracticeRow(name: string, locationId: number | null, t: {
+  newPatients: number; applying: number; applications: number; approved: number; declined: number;
+  approvalAmount: number; collected: number; cases: number; casesApproved: number; casesFunded: number;
+}): PracticeRow {
+  const ratio = (a: number, b: number) => (b > 0 ? Number(((a / b) * 100).toFixed(2)) : null);
+  return {
+    locationId, name,
+    newPatients: t.newPatients,
+    newPatientsApplying: t.applying,
+    pctNewPatientsApplying: ratio(t.applying, t.newPatients),
+    applications: t.applications,
+    approved: t.approved,
+    declined: t.declined,
+    approvalRate: ratio(t.approved, t.applications),
+    approvalRateOfDecisioned: ratio(t.approved, t.approved + t.declined),
+    approvalAmount: t.approvalAmount,
+    averageApprovalAmount: t.approved > 0 ? Number((t.approvalAmount / t.approved).toFixed(2)) : null,
+    collectedFromApps: t.collected,
+    pctCollectedFromApps: ratio(t.collected, t.approvalAmount),
+    totalCollected: null,
+    pctOfCollectionsFinanced: null,
+    cases: t.cases,
+    casesApproved: t.casesApproved,
+    caseApprovalRate: ratio(t.casesApproved, t.cases),
+    casesFunded: t.casesFunded,
+  };
+}
+
+function byPractice(s: Snapshot, range: { from: string; to: string }, f: FinanceFilters): PracticeRow[] {
+  const fundedByApp = new Map(s.fundings.map((x) => [x.application_id, x.funded_amount ?? 0]));
+  const appliedInRange = new Set(
+    s.applications.filter((a) => inRange(a.submitted_date, range.from, range.to) && a.patient_id !== null).map((a) => a.patient_id),
+  );
+  const rows = s.locations
+    .filter((l) => f.locationId === undefined || l.id === f.locationId)
+    .map((l) => {
+      const np = s.patients.filter((p) => p.location_id === l.id && inRange(p.first_visit_date, range.from, range.to));
+      const apps = s.applications.filter((a) => a.location_id === l.id && inRange(a.submitted_date, range.from, range.to));
+      const cs = s.cases.filter((c) => c.location_id === l.id && inRange(c.opened_date, range.from, range.to));
+      const approved = apps.filter((a) => a.status === "approved");
+      return buildPracticeRow(l.name, l.id, {
+        newPatients: np.length,
+        applying: np.filter((p) => appliedInRange.has(p.id)).length,
+        applications: apps.length,
+        approved: approved.length,
+        declined: apps.filter((a) => a.status === "declined").length,
+        approvalAmount: approved.reduce((n, a) => n + (a.approved_amount ?? 0), 0),
+        collected: apps.reduce((n, a) => n + (fundedByApp.get(a.id) ?? 0), 0),
+        cases: cs.length,
+        casesApproved: cs.filter((c) => c.approvals > 0).length,
+        casesFunded: cs.filter((c) => c.funded).length,
+      });
+    });
+  return rows.sort((a, b) => b.collectedFromApps - a.collectedFromApps || a.name.localeCompare(b.name));
+}
+
+function totalPracticeRow(rows: PracticeRow[]): PracticeRow {
+  const sum = (g: (r: PracticeRow) => number) => rows.reduce((n, r) => n + g(r), 0);
+  return buildPracticeRow("Total", null, {
+    newPatients: sum((r) => r.newPatients),
+    applying: sum((r) => r.newPatientsApplying),
+    applications: sum((r) => r.applications),
+    approved: sum((r) => r.approved),
+    declined: sum((r) => r.declined),
+    approvalAmount: sum((r) => r.approvalAmount),
+    collected: sum((r) => r.collectedFromApps),
+    cases: sum((r) => r.cases),
+    casesApproved: sum((r) => r.casesApproved),
+    casesFunded: sum((r) => r.casesFunded),
+  });
 }
 
 export async function getImportBatches(): Promise<ImportBatch[]> {

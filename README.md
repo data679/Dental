@@ -103,6 +103,12 @@ npm install
 npm run dev               # http://localhost:5173
 ```
 
+## The report this replaces
+
+[docs/os-dental-report.md](docs/os-dental-report.md) documents the OS Dental Finance
+Report's exact column definitions (verified against a real export) and the one column that
+needs PMS ledger data we don't ingest yet.
+
 ## Demo on GitHub Pages
 
 A backend-free build of the dashboard is deployed by

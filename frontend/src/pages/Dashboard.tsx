@@ -15,6 +15,7 @@ import { StatCard } from "../components/StatCard";
 import { LenderBarChart } from "../components/LenderBarChart";
 import { FunnelChart } from "../components/FunnelChart";
 import { MultiLenderCard } from "../components/MultiLenderCard";
+import { PracticeTable } from "../components/PracticeTable";
 
 function defaultFilters(): Filters {
   const to = new Date();
@@ -142,6 +143,8 @@ export function Dashboard() {
           </Grid>
         </>
       )}
+
+      {finance && <PracticeTable rows={finance.byPractice} total={finance.byPracticeTotal} />}
 
       {finance && <MultiLenderCard summary={finance.multiLender} />}
 

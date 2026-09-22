@@ -82,6 +82,29 @@ export interface MultiLenderSummary {
   chosenLenderWhenMultiApproved: Array<{ lender: Lender; offered: number; chosen: number; winRate: number | null }>;
 }
 
+export interface PracticeRow {
+  locationId: number | null;
+  name: string;
+  newPatients: number;
+  newPatientsApplying: number;
+  pctNewPatientsApplying: number | null;
+  applications: number;
+  approved: number;
+  declined: number;
+  approvalRate: number | null;
+  approvalRateOfDecisioned: number | null;
+  approvalAmount: number;
+  averageApprovalAmount: number | null;
+  collectedFromApps: number;
+  pctCollectedFromApps: number | null;
+  totalCollected: number | null;
+  pctOfCollectionsFinanced: number | null;
+  cases: number;
+  casesApproved: number;
+  caseApprovalRate: number | null;
+  casesFunded: number;
+}
+
 export interface FinanceSummary {
   filters: FinanceFilters;
   newPatients: PeriodStat;
@@ -90,6 +113,8 @@ export interface FinanceSummary {
   applicationsByLender: LenderCount[];
   approvalRateByLender: LenderRate[];
   multiLender: MultiLenderSummary;
+  byPractice: PracticeRow[];
+  byPracticeTotal: PracticeRow;
 }
 
 export interface LocationOption {

@@ -148,6 +148,38 @@ export interface MultiLenderSummary {
   chosenLenderWhenMultiApproved: Array<{ lender: Lender; offered: number; chosen: number; winRate: number | null }>;
 }
 
+/**
+ * One row of the practice comparison table — the column set of the OS Dental Finance
+ * Report (docs/os-dental-report.md), plus the case-level figures that report can't show.
+ */
+export interface PracticeRow {
+  locationId: number | null; // null on the Total row
+  name: string;
+  newPatients: number;
+  newPatientsApplying: number;
+  pctNewPatientsApplying: number | null;
+  applications: number;
+  approved: number;
+  declined: number;
+  /** approved ÷ applications (OS Dental's definition — includes pending/withdrawn). */
+  approvalRate: number | null;
+  /** approved ÷ decisioned — the rate a lender would quote. */
+  approvalRateOfDecisioned: number | null;
+  approvalAmount: number;
+  averageApprovalAmount: number | null;
+  collectedFromApps: number;
+  /** collected ÷ approved amount — utilisation of the credit that was extended. */
+  pctCollectedFromApps: number | null;
+  /** Practice-wide collections. null until PMS ledger data is ingested. */
+  totalCollected: number | null;
+  pctOfCollectionsFinanced: number | null;
+  cases: number;
+  casesApproved: number;
+  /** Share of PATIENTS approved — what the per-application rate hides under multi-app. */
+  caseApprovalRate: number | null;
+  casesFunded: number;
+}
+
 export interface FinanceSummary {
   filters: FinanceFilters;
   newPatients: PeriodStat;
@@ -156,4 +188,6 @@ export interface FinanceSummary {
   applicationsByLender: LenderCount[];
   approvalRateByLender: LenderRate[];
   multiLender: MultiLenderSummary;
+  byPractice: PracticeRow[];
+  byPracticeTotal: PracticeRow;
 }

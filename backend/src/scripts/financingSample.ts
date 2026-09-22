@@ -11,7 +11,13 @@ import { toCsvLine } from "../etl/financing/csv.js";
 // the financing stages of the funnel. Headers are deliberately *not* the canonical ones —
 // they look like a real portal export, to exercise the alias mapping.
 //
-// Assumptions baked in (all invented, tune freely): 45% of patients with a plan apply.
+// Ratios are tuned to the shape of the real Finance Report this replaces (see
+// docs/os-dental-report.md): roughly a third of new patients apply, each applying patient
+// is shopped to several lenders, and because the report's approval rate counts every
+// application, that per-application rate lands far below the share of patients who
+// actually get financed. Absolute volumes are much smaller than a real month.
+//
+// Assumptions baked in (all invented, tune freely): ~55% of patients with a plan apply.
 // Two workflows, mirroring how the practice actually works:
 //   • multi-app (55% of rounds): a soft check at 2–3 prime lenders the same day
 //     ("Prequalified"/"Pre-declined"), the patient picks one approval to use; some rounds
@@ -59,18 +65,23 @@ let reqSeq = 5001;
 
 for (const plan of plans) {
   if (plan.status === "declined" || !plan.presentedDate || plan.presentedDate > REF.toISOString().slice(0, 10)) continue;
-  if (rnd() > 0.45) continue;
+  // Financing tracks the size of the case: a $400 hygiene plan is paid at the desk, a
+  // $6,000 implant or ortho case is what gets shopped to lenders. This is also why the
+  // real report's average approval amount runs into the thousands.
+  const planFee = plan.proposedFee ?? 500;
+  const applyChance = planFee >= 4000 ? 0.95 : planFee >= 2000 ? 0.85 : planFee >= 900 ? 0.62 : 0.26;
+  if (rnd() > applyChance) continue;
   const patient = patientsById.get(Number(plan.denticonPatientId))!;
   const requested = Math.max(300, Math.round((plan.proposedFee ?? 500) / 50) * 50);
 
   const today = REF.toISOString().slice(0, 10);
   const makeApp = (lender: string, tier: string, appliedOn: string, opts: { soft?: boolean; fund?: boolean; requestId?: string } = {}): Row => {
-    const status = weighted([["Approved", 60], ["Declined", 25], ["Pending", 8], ["Withdrawn", 7]] as const);
+    const status = weighted([["Approved", 28], ["Declined", 55], ["Pending", 9], ["Withdrawn", 8]] as const);
     const decided = status === "Approved" || status === "Declined" ? addDays(appliedOn, weighted([[0, 70], [1, 20], [3, 10]])) : null;
-    const approved = status === "Approved" ? Math.round((requested * (1 + rnd() * 0.5)) / 100) * 100 : null;
+    const approved = status === "Approved" ? Math.round((requested * (1.2 + rnd() * 2.2)) / 100) * 100 : null;
     const willFund = status === "Approved" && (opts.fund ?? rnd() < 0.7);
     const fundedOn = willFund ? addDays(decided!, 3 + Math.floor(rnd() * 18)) : null;
-    const fundedAmt = willFund ? Math.round(approved! * (0.6 + rnd() * 0.4)) : null;
+    const fundedAmt = willFund ? Math.round(Math.min(requested, approved! * (0.3 + rnd() * 0.5))) : null;
     // Soft checks come back as prequal wording in most portals.
     const shown = opts.soft
       ? ({ Approved: "Prequalified", Declined: "Pre-declined", Pending: "Pending", Withdrawn: "Withdrawn" } as const)[status]
@@ -92,11 +103,15 @@ for (const plan of plans) {
   };
 
   const applied = addDays(plan.presentedDate, Math.floor(rnd() * 6));
-  if (rnd() < 0.55) {
+  if (rnd() < 0.85) {
     // Multi-app round: 2–3 distinct prime lenders, same day, soft pulls; the patient uses
     // at most one of the approvals.
+    // Practices shop one treatment to several lenders at once — the real report averages
+    // close to four applications per applying patient.
     const lenders = new Set<string>();
-    while (lenders.size < 2 + (rnd() < 0.4 ? 1 : 0)) lenders.add(weighted(PRIME));
+    const target = weighted([[2, 20], [3, 35], [4, 30], [5, 15]] as const);
+    let guard = 0;
+    while (lenders.size < target && guard++ < 40) lenders.add(weighted(rnd() < 0.7 ? PRIME : SUBPRIME));
     const requestId = rnd() < 0.3 ? `REQ-${reqSeq++}` : undefined;
     const round = [...lenders].map((l) => makeApp(l, "Prime", applied, { soft: true, fund: false, requestId }));
     const approvals = round.filter((r) => r.approved !== null);
@@ -106,7 +121,8 @@ for (const plan of plans) {
       const fundedOn = addDays(chosen.decided!, 3 + Math.floor(rnd() * 18));
       if (fundedOn <= today) {
         chosen.funded = fundedOn;
-        chosen.fundedAmt = Math.round(chosen.approved! * (0.6 + rnd() * 0.4));
+        // Patients rarely draw the whole limit — the report's collected ÷ approved runs ~30%.
+        chosen.fundedAmt = Math.round(Math.min(chosen.requested, chosen.approved! * (0.3 + rnd() * 0.5)));
         if (rnd() < 0.5) chosen.status = "Funded";
       }
     }

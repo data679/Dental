@@ -10,7 +10,7 @@ them is `https://api.planetdds.com/denticon/`, auth header `PDDS-Subscription-Ke
 
 Same data is served live by `npm run denticon:mock` — see docs/denticon-api.md.
 
-Dataset (seed 20260916, reference date 2026-09-15): 3 offices,
-13 providers, 420 patients,
-271 treatment plans
-(765 procedure items), 672 appointments.
+Dataset (seed 20260916, reference date 2026-09-15): 15 offices,
+61 providers, 1200 patients,
+726 treatment plans
+(2033 procedure items), 1883 appointments.

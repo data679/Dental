@@ -86,7 +86,8 @@ describe("client ↔ mock server", () => {
     expect(practice.pgId).toBe(1);
     const offices = [];
     for await (const o of client.listOffices()) offices.push(o);
-    expect(offices.map((o) => o.officeName)).toEqual(["West Covina", "Carson", "Downey"]);
+    expect(offices).toHaveLength(15);
+    expect(offices.map((o) => o.officeName)).toEqual(expect.arrayContaining(["West Covina", "Carson", "Downey", "Santa Barbara"]));
     expect(typeof offices[0]!.officeId).toBe("string");
     const providers = [];
     for await (const p of client.listProviders({ OfficeId: 101 })) providers.push(p);
@@ -101,9 +102,9 @@ describe("client ↔ mock server", () => {
     for await (const p of client.listPatients({
       OfficeId: 101,
       LastChangedOn: { DateFrom: from.toISOString(), DateTo: to.toISOString() },
-      PageSize: 25,
+      PageSize: 5,
     })) rows.push(p);
-    expect(rows.length).toBeGreaterThan(25); // more than one page
+    expect(rows.length).toBeGreaterThan(5); // more than one page
     for (const p of rows) {
       expect(p.officeId).toBe(101);
       const ms = Date.parse(p.lastChangedOn!);

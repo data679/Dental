@@ -35,6 +35,21 @@ below is an external dependency, an unverified assumption, or a decision — not
 | B8 | **Manual, ownerless process.** Exports must be downloaded and uploaded by someone on a cadence; nothing is scheduled. Lender APIs (CareCredit, Sunbit have partner programs) need agreements we don't have. | Data freshness depends on a person. | Name an owner and a cadence (monthly is fine to start). | Practice ops |
 | B9 | **PII in transit.** Lender exports contain names, DOBs and sometimes addresses; the import endpoints are **unauthenticated** until Auth0 is wired, and the app isn't hosted anywhere HIPAA-appropriate yet. | Must not point real files at a public deployment. Local use only for now. | Auth0 on the import/Denticon routes; HIPAA-eligible hosting with a BAA (Render/Railway/AWS). | Dev |
 
+## B-bis. Reference report received (2026-09-22)
+
+An aggregated monthly Finance Report export was supplied — no patient data, so nothing in
+section B's privacy concerns applies to it. It resolves several unknowns and adds one:
+
+- The exact metric definitions the practice expects are now known and implemented
+  (docs/os-dental-report.md); the practice-comparison table matches them column for column.
+- **New dependency:** "Total Collected Amounts" is practice-wide collections and can only
+  come from the PMS ledger (`dbo_Ledger` in the BCP download, landed raw today with no
+  adapter, or `/rcm/v0/ledgers`). It is the one column of the report we cannot yet produce,
+  and it also unlocks "what share of collections is financed". This raises ledger
+  ingestion from "later" to the top of the post-cutover list.
+- It confirms multi-lender applying is the norm, not an edge case.
+- Five questions for the report owner are listed at the end of docs/os-dental-report.md.
+
 ## C. What to send, verbatim
 
 **To PlanetDDS support / account manager**

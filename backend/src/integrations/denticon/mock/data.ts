@@ -110,10 +110,25 @@ const CITIES: ReadonlyArray<readonly [string, string]> = [
   ["West Covina", "91790"], ["Carson", "90745"], ["Downey", "90241"], ["Whittier", "90601"], ["Torrance", "90503"],
 ];
 
-const OFFICES: ReadonlyArray<{ id: number; name: string; city: string; zip: string; tz: string }> = [
-  { id: 101, name: "West Covina", city: "West Covina", zip: "91790", tz: "Pacific Standard Time" },
-  { id: 102, name: "Carson", city: "Carson", zip: "90745", tz: "Pacific Standard Time" },
-  { id: 103, name: "Downey", city: "Downey", zip: "90241", tz: "Pacific Standard Time" },
+// Fifteen offices, sized and named like a real Southern-California DSO so the demo has the
+// same shape as the report it replaces (see docs/os-dental-report.md). Weight = relative
+// patient volume. Synthetic practice group; only the city names are real places.
+const OFFICES: ReadonlyArray<{ id: number; name: string; city: string; zip: string; tz: string; weight: number }> = [
+  { id: 101, name: "West Covina", city: "West Covina", zip: "91790", tz: "Pacific Standard Time", weight: 7 },
+  { id: 102, name: "Carson", city: "Carson", zip: "90745", tz: "Pacific Standard Time", weight: 8 },
+  { id: 103, name: "Downey", city: "Downey", zip: "90241", tz: "Pacific Standard Time", weight: 9 },
+  { id: 104, name: "Gardena", city: "Gardena", zip: "90247", tz: "Pacific Standard Time", weight: 7 },
+  { id: 105, name: "Whittier", city: "Whittier", zip: "90601", tz: "Pacific Standard Time", weight: 5 },
+  { id: 106, name: "Montclair", city: "Montclair", zip: "91763", tz: "Pacific Standard Time", weight: 7 },
+  { id: 107, name: "Bixby Knolls", city: "Long Beach", zip: "90807", tz: "Pacific Standard Time", weight: 8 },
+  { id: 108, name: "Oxnard", city: "Oxnard", zip: "93030", tz: "Pacific Standard Time", weight: 6 },
+  { id: 109, name: "Long Beach", city: "Long Beach", zip: "90802", tz: "Pacific Standard Time", weight: 6 },
+  { id: 110, name: "Cerritos", city: "Cerritos", zip: "90703", tz: "Pacific Standard Time", weight: 6 },
+  { id: 111, name: "El Segundo", city: "El Segundo", zip: "90245", tz: "Pacific Standard Time", weight: 6 },
+  { id: 112, name: "Torrance", city: "Torrance", zip: "90503", tz: "Pacific Standard Time", weight: 6 },
+  { id: 113, name: "Santa Barbara", city: "Santa Barbara", zip: "93101", tz: "Pacific Standard Time", weight: 5 },
+  { id: 114, name: "Anaheim", city: "Anaheim", zip: "92805", tz: "Pacific Standard Time", weight: 5 },
+  { id: 115, name: "Gardena South", city: "Gardena", zip: "90249", tz: "Pacific Standard Time", weight: 7 },
 ];
 
 const REFERRAL_TYPES: DenticonReferralType[] = [
@@ -209,7 +224,7 @@ export function generateMockDataset(opts: MockDataOptions = {}): MockDataset {
   const rng = new Rng(opts.seed ?? 20260916);
   const now = opts.referenceDate ?? new Date();
   const historyDays = opts.historyDays ?? 400;
-  const patientCount = opts.patientCount ?? 420;
+  const patientCount = opts.patientCount ?? 1200;
   const epoch = addDays(now, -historyDays);
   const PG_ID = 1;
   const SYSTEM_USER = "API";
@@ -347,7 +362,7 @@ export function generateMockDataset(opts: MockDataOptions = {}): MockDataset {
   let apptDetailSeq = 990001;
 
   for (let i = 0; i < patientCount; i++) {
-    const office = rng.weighted<(typeof OFFICES)[number]>([[OFFICES[0]!, 45], [OFFICES[1]!, 35], [OFFICES[2]!, 20]]);
+    const office = rng.weighted<(typeof OFFICES)[number]>(OFFICES.map((o) => [o, o.weight] as const));
     const isLegacy = rng.chance(0.15);
     const createdOn = isLegacy
       ? addDays(epoch, -rng.int(30, 1500))
