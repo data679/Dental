@@ -60,8 +60,11 @@ section B's privacy concerns applies to it. It resolves several unknowns and add
 
 **Internal decisions needed**
 1. ~~Definition of "new patient"~~ — decided (A5).
-2. Confirm which programs each lender runs — prime, subprime, or both (B3).
-3. Who owns lender exports and how often (B8).
+2. Confirm which programs each lender runs — prime, subprime, or both (B3). The criteria
+   and the per-lender evidence are in the *Lender feeds & classification* panel; mark each
+   one `lender_confirmed` as it is checked.
+3. Who owns lender exports and how often (B8) — enter the owner and cadence in the same
+   panel; overdue feeds are then flagged automatically.
 
 ## D. Once unblocked — cutover steps
 

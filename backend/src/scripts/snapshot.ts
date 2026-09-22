@@ -68,6 +68,7 @@ const snapshot = {
   applications: await q(
     `SELECT fa.id::int, fa.case_id::int, fa.lender::text, fa.application_type::text, fa.status::text,
             fa.submitted_date::text, fa.decision_date::text, fa.approved_amount::float,
+            fa.status_detail, fa.outcome_class,
             COALESCE(fa.location_id, p.location_id)::int AS location_id, fa.patient_id::int, fa.inquiry_type,
             p.first_visit_date::text AS patient_first_visit_date
        FROM financing_applications fa LEFT JOIN patients p ON p.id = fa.patient_id ORDER BY fa.id`,
@@ -80,6 +81,7 @@ const snapshot = {
   unmatched: (await fetchJson<{ unmatched: Array<Record<string, unknown>> }>("/api/finance/unmatched", { unmatched: [] })).unmatched.map(
     ({ first_name: _f, last_name: _l, dob: _d, ...rest }) => ({ ...rest, first_name: null, last_name: null, dob: null }),
   ),
+  lenderGovernance: await fetchJson<unknown>("/api/lenders/governance", null),
   dataQuality: (() => {
     return null as unknown; // filled below
   })(),

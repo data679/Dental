@@ -10,6 +10,11 @@ const filtersSchema = z.object({
   dateTo: z.string().optional(),
   applicationType: z.enum(["primary", "subprime", "unknown"]).optional(), // unknown = lender runs both, export didn't say
   status: z.enum(["submitted", "pending", "approved", "declined"]).optional(),
+  statusDetail: z
+    .enum(["submitted", "incomplete", "withdrawn", "cancelled", "expired", "in_review", "referred",
+           "prequalified", "approved", "conditionally_approved", "pre_declined", "declined"])
+    .optional(),
+  outcomeClass: z.enum(["open", "decided", "abandoned"]).optional(),
   newPatientsOnly: z.coerce.boolean().optional(),
 });
 

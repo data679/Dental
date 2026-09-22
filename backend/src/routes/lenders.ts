@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { retierLender } from "../services/lenderService.js";
+import { getLenderGovernance, updateGovernance } from "../services/lenderGovernance.js";
 
 // Lender configuration: labels and which programs (prime / subprime) each lender runs.
 // Read by the dashboard for the lender dropdown and by the importer to resolve tiers.
@@ -28,6 +29,32 @@ const patch = z.object({
   offersSubprime: z.boolean().optional(),
   active: z.boolean().optional(),
   notes: z.string().max(500).nullable().optional(),
+  // Export governance
+  exportOwner: z.string().max(120).nullable().optional(),
+  exportCadence: z.enum(["unset", "weekly", "biweekly", "monthly", "quarterly", "on_request", "none"]).optional(),
+  exportGraceDays: z.number().int().min(0).max(120).optional(),
+  portalUrl: z.string().url().max(500).nullable().optional(),
+  classificationSource: z.enum(["unconfirmed", "inferred_from_data", "lender_confirmed"]).optional(),
+});
+
+// GET /api/lenders/governance — per lender: who owns the export, how often it should
+// arrive, whether it has, and the evidence for its prime/subprime classification.
+lendersRouter.get("/governance", async (_req, res, next) => {
+  try {
+    const lenders = await getLenderGovernance();
+    res.json({
+      lenders,
+      summary: {
+        unassigned: lenders.filter((l) => l.active && !l.exportOwner).length,
+        noCadence: lenders.filter((l) => l.active && l.exportCadence === "unset").length,
+        overdue: lenders.filter((l) => l.active && l.feedStatus === "overdue").length,
+        never: lenders.filter((l) => l.active && l.feedStatus === "never").length,
+        unconfirmedTier: lenders.filter((l) => l.active && l.classificationSource === "unconfirmed").length,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // `code` is a Postgres enum: an unknown string fails at bind time (22P02 → 500), so check
@@ -46,6 +73,7 @@ lendersRouter.put("/:code", async (req, res, next) => {
       res.status(404).json({ error: "unknown lender" });
       return;
     }
+    await updateGovernance(req.params.code, b);
     const { rows } = await pool.query(
       `UPDATE lenders SET
          label = COALESCE($2, label),

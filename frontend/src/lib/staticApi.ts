@@ -6,10 +6,12 @@ import type {
   FunnelSummaryResponse,
   ImportBatch,
   Lender,
+  LenderGovernanceResponse,
   LenderOption,
   LocationOption,
   MultiLenderSummary,
   PracticeRow,
+  StatusBreakdownRow,
   UnmatchedApplication,
 } from "./api";
 
@@ -23,6 +25,7 @@ interface Snapshot {
   note: string;
   locations: LocationOption[];
   lenders?: LenderOption[];
+  lenderGovernance?: LenderGovernanceResponse;
   patients: Array<{ id: number; location_id: number | null; provider_id: number | null; first_visit_date: string | null; new_patient_flag: boolean; has_application: boolean }>;
   treatmentPlans: Array<{ id: number; patient_id: number; presented_date: string | null }>;
   treatmentCompletions: Array<{ treatment_plan_id: number; patient_id: number; completed_date: string | null }>;
@@ -35,6 +38,7 @@ interface Snapshot {
     id: number; case_id: number | null; lender: Lender; application_type: "primary" | "subprime" | null; status: string;
     submitted_date: string | null; decision_date: string | null; approved_amount: number | null; location_id: number | null;
     patient_id: number | null; inquiry_type: "soft" | "hard" | null; patient_first_visit_date: string | null;
+    status_detail: string | null; outcome_class: "open" | "decided" | "abandoned" | null;
   }>;
   fundings: Array<{ application_id: number; funded_date: string | null; funded_amount: number | null }>;
   imports: ImportBatch[];
@@ -169,7 +173,9 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
     if (f.status !== undefined && a.status !== f.status) continue;
     byLender.set(a.lender, (byLender.get(a.lender) ?? 0) + 1);
   }
-  const applicationsByLender = [...byLender].map(([lender, count]) => ({ lender, count })).sort((a, b) => b.count - a.count);
+  const applicationsByLender = [...byLender]
+    .map(([lender, count]) => ({ lender, count }))
+    .sort((a, b) => b.count - a.count || a.lender.localeCompare(b.lender));
 
   const rate = new Map<Lender, { approved: number; total: number }>();
   for (const a of s.applications) {
@@ -220,6 +226,27 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
 
   const practiceRows = byPractice(s, current, f);
 
+  // Mirrors statusBreakdown() in backend/src/services/financeService.ts: group by
+  // (status, detail, outcome class) over applications submitted in the range.
+  const breakdown = new Map<string, StatusBreakdownRow>();
+  for (const a of s.applications) {
+    if (!inRange(a.submitted_date, current.from, current.to)) continue;
+    if (f.locationId !== undefined && a.location_id !== f.locationId) continue;
+    const key = `${a.status}|${a.status_detail ?? ""}|${a.outcome_class ?? ""}`;
+    const row = breakdown.get(key);
+    if (row) row.count += 1;
+    else
+      breakdown.set(key, {
+        status: a.status as StatusBreakdownRow["status"],
+        statusDetail: a.status_detail,
+        outcomeClass: a.outcome_class,
+        count: 1,
+      });
+  }
+  const statusBreakdown = [...breakdown.values()].sort(
+    (x, y) => y.count - x.count || x.status.localeCompare(y.status) || (x.statusDetail ?? "").localeCompare(y.statusDetail ?? ""),
+  );
+
   return {
     filters: { ...f, dateFrom: current.from, dateTo: current.to },
     newPatients,
@@ -233,6 +260,7 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
     multiLender,
     byPractice: practiceRows,
     byPracticeTotal: totalPracticeRow(practiceRows),
+    statusBreakdown,
   };
 }
 
@@ -316,6 +344,12 @@ export async function getImportBatches(): Promise<ImportBatch[]> {
 export async function getUnmatchedApplications(): Promise<UnmatchedApplication[]> {
   return (await loadSnapshot()).unmatched;
 }
+export async function getLenderGovernance(): Promise<LenderGovernanceResponse> {
+  const s = await loadSnapshot();
+  if (!s.lenderGovernance) throw new Error("lender governance not in snapshot");
+  return s.lenderGovernance;
+}
+
 export async function getDataQuality(): Promise<DataQualityReport> {
   const s = await loadSnapshot();
   if (!s.dataQuality) throw new Error("data-quality report not in snapshot");

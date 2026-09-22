@@ -56,6 +56,57 @@ const CHECKS: Check[] = [
             FROM financing_applications WHERE case_id IS NULL`,
   },
   {
+    id: "lender_feed_overdue",
+    title: "Lender exports overdue or never received",
+    severity: "warning",
+    hint: "The feed hasn't arrived within its cadence plus grace. Either nobody pulled it or the lender stopped producing it — the dashboard just shows less business either way. Set the owner and cadence under /api/lenders/governance.",
+    sql: `WITH last_import AS (
+            SELECT fa.lender, max(b.imported_at) AS last_at
+              FROM financing_applications fa
+              JOIN staging_financing_csv s ON s.id = fa.staging_row_id
+              JOIN financing_import_batches b ON b.id = s.batch_id
+             GROUP BY fa.lender)
+          SELECT l.label AS label,
+                 CASE WHEN li.last_at IS NULL THEN 'no export ever imported'
+                      ELSE 'last import ' || (now()::date - li.last_at::date) || ' days ago, expected every '
+                           || CASE l.export_cadence WHEN 'weekly' THEN 7 WHEN 'biweekly' THEN 14
+                                WHEN 'monthly' THEN 31 WHEN 'quarterly' THEN 92 END || ' days'
+                 END || coalesce(' · owner: ' || l.export_owner, ' · no owner assigned') AS detail
+            FROM lenders l LEFT JOIN last_import li ON li.lender = l.code
+           WHERE l.active
+             AND l.export_cadence IN ('weekly','biweekly','monthly','quarterly')
+             AND (li.last_at IS NULL
+                  OR (now()::date - li.last_at::date) > l.export_grace_days + CASE l.export_cadence
+                       WHEN 'weekly' THEN 7 WHEN 'biweekly' THEN 14 WHEN 'monthly' THEN 31 WHEN 'quarterly' THEN 92 END)`,
+  },
+  {
+    id: "lender_governance_unassigned",
+    title: "Lenders with no export owner or cadence",
+    severity: "info",
+    hint: "Nobody is named as responsible for pulling this lender's export, or no schedule is set, so nothing can be flagged as late.",
+    sql: `SELECT label AS label,
+                 concat_ws(', ', CASE WHEN export_owner IS NULL THEN 'no owner' END,
+                                 CASE WHEN export_cadence = 'unset' THEN 'no cadence' END) AS detail
+            FROM lenders WHERE active AND (export_owner IS NULL OR export_cadence = 'unset')`,
+  },
+  {
+    id: "applications_abandoned",
+    title: "Applications withdrawn, expired or cancelled",
+    severity: "info",
+    hint: "Submitted but never decided because the patient or practice dropped it, or the offer lapsed. Distinct from applications still waiting on the lender — these are lost opportunities, not pipeline.",
+    sql: `SELECT '#' || id AS label, lender || ' · ' || status_detail || ' · ' || coalesce(submitted_date::text, 'no date') AS detail
+            FROM financing_applications WHERE outcome_class = 'abandoned'`,
+  },
+  {
+    id: "applications_stale_open",
+    title: "Applications still open after 60 days",
+    severity: "warning",
+    hint: "Submitted or in review with no decision for two months. Usually the lender's decision never made it into an export, or the application was abandoned without being marked so.",
+    sql: `SELECT '#' || id AS label, lender || ' · ' || coalesce(status_detail, status::text) || ' · submitted ' || submitted_date::text AS detail
+            FROM financing_applications
+           WHERE outcome_class = 'open' AND submitted_date IS NOT NULL AND submitted_date < now()::date - 60`,
+  },
+  {
     id: "applications_unknown_tier",
     title: "Applications with unknown prime/subprime tier",
     severity: "warning",

@@ -23,4 +23,4 @@ curl -X POST 'http://localhost:4000/api/finance/import?sourceFile=sample-lender-
 ```
 
 The canonical template (headers the importer needs no aliases for) is
-`GET /api/finance/import/template`. 838 rows; every name, DOB and id is invented.
+`GET /api/finance/import/template`. 924 rows; every name, DOB and id is invented.

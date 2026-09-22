@@ -213,8 +213,9 @@ async function upsertApplication(db: Db, rec: NormalizedApplication, stagingRowI
     `INSERT INTO financing_applications
        (patient_id, treatment_plan_id, lender, application_type, status, submitted_date, decision_date,
         approved_amount, requested_amount, decline_reason, location_id, external_id, dedupe_key,
-        match_status, match_detail, staging_row_id, inquiry_type, application_type_source)
-     VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        match_status, match_detail, staging_row_id, inquiry_type, application_type_source,
+        status_raw, status_detail)
+     VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
      ON CONFLICT (dedupe_key) DO UPDATE SET
        patient_id = COALESCE(EXCLUDED.patient_id, financing_applications.patient_id),
        -- Tier precedence: a value the export stated ('file') is never replaced by one we
@@ -230,6 +231,8 @@ async function upsertApplication(db: Db, rec: NormalizedApplication, stagingRowI
          WHEN EXCLUDED.application_type IS NULL THEN COALESCE(financing_applications.application_type_source, 'unknown')
          ELSE EXCLUDED.application_type_source END,
        status = EXCLUDED.status,
+       status_raw = COALESCE(EXCLUDED.status_raw, financing_applications.status_raw),
+       status_detail = COALESCE(EXCLUDED.status_detail, financing_applications.status_detail),
        submitted_date = COALESCE(EXCLUDED.submitted_date, financing_applications.submitted_date),
        decision_date = COALESCE(EXCLUDED.decision_date, financing_applications.decision_date),
        approved_amount = COALESCE(EXCLUDED.approved_amount, financing_applications.approved_amount),
@@ -242,7 +245,7 @@ async function upsertApplication(db: Db, rec: NormalizedApplication, stagingRowI
        inquiry_type = COALESCE(EXCLUDED.inquiry_type, financing_applications.inquiry_type),
        updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`,
-    [patientId, rec.lender, rec.applicationType, rec.status, rec.submittedDate, rec.decisionDate, rec.approvedAmount, rec.requestedAmount, rec.declineReason, locationId, rec.externalId, rec.dedupeKey, match.status, match.detail, stagingRowId, rec.inquiryType, rec.applicationTypeSource],
+    [patientId, rec.lender, rec.applicationType, rec.status, rec.submittedDate, rec.decisionDate, rec.approvedAmount, rec.requestedAmount, rec.declineReason, locationId, rec.externalId, rec.dedupeKey, match.status, match.detail, stagingRowId, rec.inquiryType, rec.applicationTypeSource, rec.statusRaw, rec.statusDetail],
   );
   const applicationId = Number(rows[0].id);
   const inserted = Boolean(rows[0].inserted);

@@ -7,6 +7,7 @@ import type {
   LenderCount,
   LenderRate,
   MultiLenderSummary,
+  StatusBreakdownRow,
   PeriodStat,
 } from "../types/domain.js";
 
@@ -112,6 +113,14 @@ async function applicationsByLender(range: Range, filters: FinanceFilters): Prom
     params.push(filters.status);
     clauses.push(`fa.status = $${params.length}`);
   }
+  if (filters.statusDetail !== undefined) {
+    params.push(filters.statusDetail);
+    clauses.push(`fa.status_detail = $${params.length}`);
+  }
+  if (filters.outcomeClass !== undefined) {
+    params.push(filters.outcomeClass);
+    clauses.push(`fa.outcome_class = $${params.length}`);
+  }
   if (filters.newPatientsOnly) clauses.push(NEW_IN_PERIOD);
 
   const { rows } = await pool.query<{ lender: LenderCount["lender"]; count: string }>(
@@ -120,7 +129,7 @@ async function applicationsByLender(range: Range, filters: FinanceFilters): Prom
      LEFT JOIN patients p ON p.id = fa.patient_id
      WHERE ${clauses.join(" AND ")}
      GROUP BY fa.lender
-     ORDER BY count(*) DESC`,
+     ORDER BY count(*) DESC, fa.lender::text`,
     params,
   );
   return rows.map((r) => ({ lender: r.lender, count: Number(r.count) }));
@@ -364,17 +373,47 @@ function totalPracticeRow(rows: PracticeRow[]): PracticeRow {
   });
 }
 
+/**
+ * How applications ended up, at the granularity the coarse status hides: an application
+ * nobody ever decided on ("open") is a different problem from one the patient pulled
+ * ("abandoned"). Counts applications submitted in the range.
+ */
+async function statusBreakdown(range: Range, filters: FinanceFilters): Promise<StatusBreakdownRow[]> {
+  const params: unknown[] = [range.from, range.to];
+  const clauses = ["fa.submitted_date >= $1", "fa.submitted_date <= $2"];
+  if (filters.locationId !== undefined) {
+    params.push(filters.locationId);
+    clauses.push(`COALESCE(fa.location_id, p.location_id) = $${params.length}`);
+  }
+  const { rows } = await pool.query<{ status: string; status_detail: string | null; outcome_class: string | null; n: string }>(
+    `SELECT fa.status::text AS status, fa.status_detail, fa.outcome_class, count(*)::text AS n
+       FROM financing_applications fa
+       LEFT JOIN patients p ON p.id = fa.patient_id
+      WHERE ${clauses.join(" AND ")}
+      GROUP BY 1, 2, 3
+      ORDER BY count(*) DESC, fa.status::text, fa.status_detail`,
+    params,
+  );
+  return rows.map((r) => ({
+    status: r.status as StatusBreakdownRow["status"],
+    statusDetail: r.status_detail,
+    outcomeClass: r.outcome_class as StatusBreakdownRow["outcomeClass"],
+    count: Number(r.n),
+  }));
+}
+
 export async function getFinanceSummary(filters: FinanceFilters): Promise<FinanceSummary> {
   const current = resolveDateRange(filters);
   const prior = priorPeriod(current.from, current.to);
 
-  const [newPatients, newPatientsApplying, appsByLender, approvalByLender, multiLender, practices] = await Promise.all([
+  const [newPatients, newPatientsApplying, appsByLender, approvalByLender, multiLender, practices, statuses] = await Promise.all([
     periodStat(current, prior, filters, false),
     periodStat(current, prior, filters, true),
     applicationsByLender(current, filters),
     approvalRateByLender(current, filters),
     multiLenderSummary(current, filters),
     byPractice(current, filters),
+    statusBreakdown(current, filters),
   ]);
 
   return {
@@ -390,6 +429,7 @@ export async function getFinanceSummary(filters: FinanceFilters): Promise<Financ
     multiLender,
     byPractice: practices,
     byPracticeTotal: totalPracticeRow(practices),
+    statusBreakdown: statuses,
   };
 }
 

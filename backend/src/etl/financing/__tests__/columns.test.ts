@@ -50,11 +50,11 @@ describe("value normalisers", () => {
   });
 
   it("maps statuses, and treats funded/used as approved + funding", () => {
-    expect(normalizeStatus("Approved")).toEqual({ status: "approved", impliesFunded: false });
-    expect(normalizeStatus("DENIED")).toEqual({ status: "declined", impliesFunded: false });
-    expect(normalizeStatus("In Review")).toEqual({ status: "pending", impliesFunded: false });
-    expect(normalizeStatus("Funded")).toEqual({ status: "approved", impliesFunded: true });
-    expect(normalizeStatus("Expired")).toEqual({ status: "submitted", impliesFunded: false });
+    expect(normalizeStatus("Approved")).toMatchObject({ status: "approved", impliesFunded: false });
+    expect(normalizeStatus("DENIED")).toMatchObject({ status: "declined", impliesFunded: false });
+    expect(normalizeStatus("In Review")).toMatchObject({ status: "pending", impliesFunded: false });
+    expect(normalizeStatus("Funded")).toMatchObject({ status: "approved", impliesFunded: true });
+    expect(normalizeStatus("Expired")).toMatchObject({ status: "submitted", impliesFunded: false });
     expect(normalizeStatus("???")).toBeNull();
   });
 
@@ -231,5 +231,35 @@ describe("edge cases", () => {
     const b = run({ ...base, "Last Name": "MUNOZ OBRIEN", "First Name": "jose" });
     expect(a.ok && b.ok && a.record.dedupeKey).toBe(b.ok && b.record.dedupeKey);
     expect(a.ok && a.record.dedupeKey).toBe("cherry:munozobrien|jose|1990-01-01:2026-09-01");
+  });
+});
+
+describe("status sub-states", () => {
+  it("keeps withdrawn/expired/cancelled apart from an application still awaiting a decision", () => {
+    // All four are coarse-'submitted' — they were submitted and never decided — but the
+    // sub-state says whether the application died or is still live.
+    for (const word of ["Withdrawn", "Cancelled", "Expired", "Incomplete"]) {
+      const r = normalizeStatus(word)!;
+      expect(r.status).toBe("submitted");
+      expect(r.detail).toBe(word.toLowerCase());
+    }
+    expect(normalizeStatus("Submitted")).toMatchObject({ status: "submitted", detail: "submitted" });
+    expect(normalizeStatus("In Review")).toMatchObject({ status: "pending", detail: "in_review" });
+    expect(normalizeStatus("Referred")).toMatchObject({ status: "pending", detail: "referred" });
+  });
+
+  it("distinguishes soft prequalification from a full decision, and conditional approvals", () => {
+    expect(normalizeStatus("Prequalified")).toMatchObject({ status: "approved", detail: "prequalified", impliesSoft: true });
+    expect(normalizeStatus("Pre-declined")).toMatchObject({ status: "declined", detail: "pre_declined", impliesSoft: true });
+    expect(normalizeStatus("Conditionally Approved")).toMatchObject({ status: "approved", detail: "conditionally_approved" });
+    expect(normalizeStatus("Funded")).toMatchObject({ status: "approved", detail: "approved", impliesFunded: true });
+    expect(normalizeStatus("nonsense")).toBeNull();
+  });
+
+  it("a row with funding evidence keeps a sub-state consistent with its coarse status", () => {
+    const H = ["Lender", "Status", "Application Date", "Funded Amount", "Last Name", "DOB"];
+    const M = mapHeaders(H);
+    const r = normalizeRow(["Cherry", "Declined", "9/1/2026", "500", "Doe", "1/1/1990"], H, M, 1);
+    expect(r.ok && r.record).toMatchObject({ status: "approved", statusDetail: "approved", statusRaw: "Declined" });
   });
 });

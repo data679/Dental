@@ -82,6 +82,13 @@ export interface MultiLenderSummary {
   chosenLenderWhenMultiApproved: Array<{ lender: Lender; offered: number; chosen: number; winRate: number | null }>;
 }
 
+export interface StatusBreakdownRow {
+  status: ApplicationStatus;
+  statusDetail: string | null;
+  outcomeClass: "open" | "decided" | "abandoned" | null;
+  count: number;
+}
+
 export interface PracticeRow {
   locationId: number | null;
   name: string;
@@ -115,6 +122,7 @@ export interface FinanceSummary {
   multiLender: MultiLenderSummary;
   byPractice: PracticeRow[];
   byPracticeTotal: PracticeRow;
+  statusBreakdown: StatusBreakdownRow[];
 }
 
 export interface LocationOption {
@@ -165,6 +173,57 @@ export async function getFinanceSummary(filters: FinanceFilters = {}): Promise<F
   const res = await fetch(`/api/finance/summary?${toQueryString(filters)}`);
   if (!res.ok) throw new Error(`Failed to load finance summary: ${res.status}`);
   return res.json();
+}
+
+export interface LenderGovernanceRow {
+  code: Lender;
+  label: string;
+  active: boolean;
+  offersPrime: boolean;
+  offersSubprime: boolean;
+  classificationSource: "unconfirmed" | "inferred_from_data" | "lender_confirmed";
+  exportOwner: string | null;
+  exportCadence: string;
+  exportGraceDays: number;
+  portalUrl: string | null;
+  lastImportAt: string | null;
+  lastImportFile: string | null;
+  daysSinceLastImport: number | null;
+  expectedEveryDays: number | null;
+  feedStatus: "ok" | "due" | "overdue" | "never" | "no_schedule";
+  applications: number;
+  observed: {
+    decisioned: number;
+    approvalRateOfDecisioned: number | null;
+    avgApprovedAmount: number | null;
+    medianApprovedAmount: number | null;
+    unknownTier: number;
+    statedPrime: number;
+    statedSubprime: number;
+  };
+  classificationHint: string;
+}
+
+export interface LenderGovernanceResponse {
+  lenders: LenderGovernanceRow[];
+  summary: { unassigned: number; noCadence: number; overdue: number; never: number; unconfirmedTier: number };
+}
+
+export async function getLenderGovernance(): Promise<LenderGovernanceResponse> {
+  if (STATIC_MODE) return (await staticApi()).getLenderGovernance();
+  const res = await fetch("/api/lenders/governance");
+  if (!res.ok) throw new Error(`Failed to load lender governance: ${res.status}`);
+  return res.json();
+}
+
+export async function updateLender(code: string, patch: Record<string, unknown>): Promise<void> {
+  if (STATIC_MODE) throw new Error("Editing lender settings needs the backend — it's disabled in the demo.");
+  const res = await fetch(`/api/lenders/${code}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `Update failed: ${res.status}`);
 }
 
 export async function getLenders(): Promise<LenderOption[]> {

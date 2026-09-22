@@ -89,9 +89,12 @@ anywhere in this repo, in seed data, or in logs — synthetic data only.
    is what the New Patients tiles and the Patient Type toggle use. The other candidate
    signals (chart created, patient type code, appointment `isNewPatient`) stay available in
    staging `raw` if this is ever revisited.
-2. **How granular does application status need to be?** Storyboard lists
-   submitted/pending/approved/declined, but flags that "in review" or "expired" might also be
-   needed. Affects the `financing_applications.status` enum below.
+2. ~~**How granular does application status need to be?**~~ **Decided 2026-09-22:** the
+   coarse four-state enum stays (the Finance Report is built on it), and each application
+   additionally keeps the lender's verbatim wording (`status_raw`), a normalised
+   `status_detail` (withdrawn / expired / cancelled / in_review / referred / prequalified /
+   conditionally_approved / pre_declined / …) and a derived `outcome_class`
+   (open | decided | abandoned). Migration 0011; see financing-intake.md § Statuses.
 3. **What fields are actually required per record?** The entity list above is a first pass
    from the storyboard. Denticon field availability is now known (see
    [denticon-api.md](denticon-api.md)) — what's still unconfirmed is which of them the

@@ -110,6 +110,10 @@ export interface FinanceFilters {
   dateTo?: string;
   applicationType?: ApplicationType | "unknown"; // "Prime vs SubPrime" (unknown = tier not stated for a both-program lender)
   status?: ApplicationStatus; // "Status Filter"
+  /** Finer than `status`: withdrawn / expired / in_review / … (see migration 0011). */
+  statusDetail?: string;
+  /** 'open' | 'decided' | 'abandoned' — did the application die, or is it still live? */
+  outcomeClass?: "open" | "decided" | "abandoned";
   newPatientsOnly?: boolean; // "Patient Type": All vs New Patients (first visit within the period)
 }
 
@@ -180,6 +184,14 @@ export interface PracticeRow {
   casesFunded: number;
 }
 
+export interface StatusBreakdownRow {
+  status: ApplicationStatus;
+  statusDetail: string | null;
+  /** 'open' = still awaiting a decision, 'decided', 'abandoned' = withdrawn/expired/cancelled. */
+  outcomeClass: "open" | "decided" | "abandoned" | null;
+  count: number;
+}
+
 export interface FinanceSummary {
   filters: FinanceFilters;
   newPatients: PeriodStat;
@@ -190,4 +202,5 @@ export interface FinanceSummary {
   multiLender: MultiLenderSummary;
   byPractice: PracticeRow[];
   byPracticeTotal: PracticeRow;
+  statusBreakdown: StatusBreakdownRow[];
 }

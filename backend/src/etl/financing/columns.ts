@@ -212,37 +212,56 @@ export function normalizeApplicationType(raw: string | undefined): ApplicationTy
   return null;
 }
 
+/** Normalised sub-state; `status` stays coarse for the Finance Report. See migration 0011. */
+export type StatusDetail =
+  | "submitted" | "incomplete" | "withdrawn" | "cancelled" | "expired"
+  | "in_review" | "referred"
+  | "prequalified" | "approved" | "conditionally_approved"
+  | "pre_declined" | "declined";
+
+export interface NormalizedStatus {
+  status: ApplicationStatus;
+  /** What the lender actually said, normalised — keeps "withdrawn" distinct from "waiting". */
+  detail: StatusDetail;
+  impliesFunded: boolean;
+  impliesSoft?: boolean;
+}
+
+// Each sub-state and the words lenders use for it. Add spellings here, not in the code
+// below. Order matters only in that the first match wins.
+const STATUS_WORDS: ReadonlyArray<readonly [StatusDetail, ApplicationStatus, RegExp, { funded?: boolean; soft?: boolean }]> = [
+  ["prequalified", "approved", /^(prequalified|pre qualified|prequal|pre approved|preapproved|soft approved|offer|offered)$/, { soft: true }],
+  ["pre_declined", "declined", /^(pre declined|predeclined|not prequalified|no offer|soft declined)$/, { soft: true }],
+  ["conditionally_approved", "approved", /^(conditionally approved|approved with conditions|conditional)$/, {}],
+  ["approved", "approved", /^(approved|approve|accepted|qualified)$/, {}],
+  // "Funded"/"used" is an approval that was drawn on; funding itself lives in `fundings`.
+  ["approved", "approved", /^(funded|used|disbursed|booked|activated|purchased|complete|completed)$/, { funded: true }],
+  ["declined", "declined", /^(declined|decline|denied|deny|rejected|reject|not approved|unapproved)$/, {}],
+  ["referred", "pending", /^(referred|manual review|escalated|second look)$/, {}],
+  ["in_review", "pending", /^(pending|in review|review|processing|under review|awaiting|open)$/, {}],
+  ["withdrawn", "submitted", /^(withdrawn|withdrew|patient withdrew|rescinded)$/, {}],
+  ["cancelled", "submitted", /^(cancelled|canceled|voided)$/, {}],
+  ["expired", "submitted", /^(expired|lapsed|offer expired|timed out)$/, {}],
+  ["incomplete", "submitted", /^(incomplete|abandoned|not completed|started)$/, {}],
+  ["submitted", "submitted", /^(submitted|applied|new|received)$/, {}],
+];
+
 /**
- * Status, whether the row implies funding ("funded"/"used" ⇒ approved + funding), and
- * whether the wording implies a soft check ("prequalified"/"pre-approved" ⇒ soft inquiry).
+ * Coarse status (what the Finance Report counts), the sub-state behind it, whether the
+ * wording implies the credit was drawn, and whether it implies a soft pull.
+ *
+ * Withdrawn / cancelled / expired / incomplete all stay `submitted` at the coarse level —
+ * they were submitted and never decided — but keep their own sub-state so they can be told
+ * apart from an application still waiting on the lender (`outcome_class = 'abandoned'`
+ * vs `'open'`).
  */
-export function normalizeStatus(
-  raw: string | undefined,
-): { status: ApplicationStatus; impliesFunded: boolean; impliesSoft?: boolean } | null {
+export function normalizeStatus(raw: string | undefined): NormalizedStatus | null {
   const v = (raw ?? "").trim().toLowerCase().replace(/[^a-z ]/g, "").replace(/\s+/g, " ");
   if (!v) return null;
-  if (/^(prequalified|pre qualified|prequal|pre approved|preapproved|soft approved|offer|offered)$/.test(v)) {
-    return { status: "approved", impliesFunded: false, impliesSoft: true };
-  }
-  if (/^(pre declined|predeclined|not prequalified|no offer)$/.test(v)) {
-    return { status: "declined", impliesFunded: false, impliesSoft: true };
-  }
-  if (/^(approved|approve|accepted|conditionally approved|qualified)$/.test(v)) {
-    return { status: "approved", impliesFunded: false };
-  }
-  if (/^(funded|used|disbursed|booked|activated|purchased|complete|completed)$/.test(v)) {
-    return { status: "approved", impliesFunded: true };
-  }
-  if (/^(declined|decline|denied|deny|rejected|reject|not approved|unapproved)$/.test(v)) {
-    return { status: "declined", impliesFunded: false };
-  }
-  if (/^(pending|in review|review|processing|under review|awaiting|open|referred|manual review)$/.test(v)) {
-    return { status: "pending", impliesFunded: false };
-  }
-  if (/^(submitted|applied|new|received|started|incomplete|withdrawn|cancelled|canceled|expired)$/.test(v)) {
-    // Withdrawn/expired/cancelled applications never reached a decision; keep them as
-    // "submitted" so they count in the top of the funnel and nowhere else.
-    return { status: "submitted", impliesFunded: false };
+  for (const [detail, status, re, flags] of STATUS_WORDS) {
+    if (re.test(v)) {
+      return { status, detail, impliesFunded: Boolean(flags.funded), ...(flags.soft ? { impliesSoft: true } : {}) };
+    }
   }
   return null;
 }
@@ -314,6 +333,10 @@ export function normalizeText(raw: string | undefined): string | null {
 export interface NormalizedApplication {
   externalId: string | null;
   lender: Lender;
+  /** Verbatim status from the export, kept for audit and re-mapping. */
+  statusRaw: string | null;
+  /** Sub-state behind the coarse status (withdrawn vs still waiting, etc.). */
+  statusDetail: StatusDetail;
   /** null = unknown: the lender offers both tiers and the export didn't say. */
   applicationType: ApplicationType | null;
   applicationTypeSource: ApplicationTypeSource;
@@ -472,6 +495,10 @@ export function normalizeRow(
   const record: NormalizedApplication = {
     externalId,
     lender,
+    statusRaw: statusRaw?.trim() || null,
+    // A row the file called declined/pending but that carries funding evidence is an
+    // approval that was drawn on; keep the sub-state consistent with the coarse status.
+    statusDetail: impliesFunded && status.status !== "approved" ? "approved" : status.detail,
     applicationType,
     applicationTypeSource: tier.source,
     status: finalStatus,

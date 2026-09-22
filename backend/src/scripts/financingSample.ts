@@ -46,6 +46,31 @@ const addDays = (iso: string, n: number) => new Date(Date.parse(iso) + n * 86_40
 const us = (iso: string | null) => (iso ? `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}/${iso.slice(0, 4)}` : "");
 const money = (n: number | null) => (n === null ? "" : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`);
 
+// Which programs each lender runs, mirroring the `lenders` table seeded in migration 0010.
+// The Program column written below follows this, so a subprime-only lender never produces
+// a "Prime" row — the export and the configuration agree, as they would in reality.
+const LENDER_TIERS: Record<string, { prime: boolean; subprime: boolean }> = {
+  CareCredit: { prime: true, subprime: false },
+  "Care Credit": { prime: true, subprime: false },
+  "Alphaeon Credit": { prime: true, subprime: false },
+  Cherry: { prime: true, subprime: true },
+  "Proceed Finance": { prime: true, subprime: true },
+  Sunbit: { prime: true, subprime: true },
+  HFD: { prime: false, subprime: true },
+  "Covered Care": { prime: false, subprime: true },
+  Fortiva: { prime: false, subprime: true },
+  Access: { prime: true, subprime: true },
+};
+
+/** The tier a row states: forced for single-program lenders, the round's own tier otherwise. */
+function programFor(lender: string, roundTier: string): string {
+  const t = LENDER_TIERS[lender];
+  if (!t) return roundTier;
+  if (t.prime && !t.subprime) return "Prime";
+  if (t.subprime && !t.prime) return "SubPrime";
+  return roundTier;
+}
+
 const PRIME: ReadonlyArray<readonly [string, number]> = [["CareCredit", 40], ["Cherry", 20], ["Alphaeon Credit", 15], ["Proceed Finance", 10], ["Sunbit", 15]];
 const SUBPRIME: ReadonlyArray<readonly [string, number]> = [["HFD", 35], ["Fortiva", 25], ["Access", 20], ["Covered Care", 20]];
 const DECLINE_REASONS = ["Insufficient credit history", "Debt-to-income too high", "Recent delinquency", "Unable to verify income", "Credit score below threshold"];
@@ -88,7 +113,8 @@ for (const plan of plans) {
       : status;
     return {
       id: `${lender.slice(0, 2).toUpperCase()}-${appSeq++}`,
-      lender, tier,
+      lender,
+      tier: programFor(lender, tier),
       status: willFund && rnd() < 0.5 ? "Funded" : shown, // some exports say "Funded", some keep the approval + a funded date
       applied: appliedOn, decided, requested, approved,
       reason: status === "Declined" ? pick(DECLINE_REASONS) : "",
@@ -141,9 +167,9 @@ for (const plan of plans) {
 
 // A few rows the importer must cope with: applicants not in the PMS (unmatched), a
 // lender spelled differently, and a status the mapper doesn't know (rejected).
-rows.push({ ...rows[0]!, id: "CA-999001", first: "Nobody", last: "Inpms", dob: "1970-01-01", chart: "", lender: "Care Credit", status: "Approved" });
-rows.push({ ...rows[1]!, id: "CH-999002", first: "Also", last: "Missing", dob: "1980-05-05", chart: "", lender: "Cherry", status: "Declined" });
-rows.push({ ...rows[2]!, id: "SU-999003", lender: "Sunbit", status: "Kinda approved?" });
+rows.push({ ...rows[0]!, id: "CA-999001", first: "Nobody", last: "Inpms", dob: "1970-01-01", chart: "", lender: "Care Credit", tier: programFor("Care Credit", "Prime"), status: "Approved", funded: null, fundedAmt: null });
+rows.push({ ...rows[1]!, id: "CH-999002", first: "Also", last: "Missing", dob: "1980-05-05", chart: "", lender: "Cherry", tier: programFor("Cherry", "Prime"), status: "Declined", funded: null, fundedAmt: null });
+rows.push({ ...rows[2]!, id: "SU-999003", lender: "Sunbit", tier: programFor("Sunbit", "Prime"), status: "Kinda approved?" });
 
 rows.sort((a, b) => a.applied.localeCompare(b.applied));
 

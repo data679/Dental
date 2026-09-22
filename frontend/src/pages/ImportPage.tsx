@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Text, Title } from "@tremor/react";
 import {
   getDataQuality,
+  getLenderGovernance,
   getBcpStatus,
   getImportBatches,
   getUnmatchedApplications,
   importFinancingCsv,
   rematchApplications,
   type DataQualityReport,
+  type LenderGovernanceResponse,
   type BcpStatus,
   type ImportBatch,
   type ImportResult,
@@ -15,6 +17,7 @@ import {
   STATIC_MODE,
 } from "../lib/api";
 import { DataQualityPanel } from "../components/DataQualityPanel";
+import { LenderGovernancePanel } from "../components/LenderGovernancePanel";
 import { LENDER_LABELS } from "../lib/lenders";
 import { BcpFeedPanel } from "../components/BcpFeedPanel";
 
@@ -37,6 +40,7 @@ export function ImportPage() {
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [unmatched, setUnmatched] = useState<UnmatchedApplication[]>([]);
   const [quality, setQuality] = useState<DataQualityReport | null>(null);
+  const [governance, setGovernance] = useState<LenderGovernanceResponse | null>(null);
   const [bcp, setBcp] = useState<BcpStatus | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -262,6 +266,13 @@ export function ImportPage() {
       </Card>
 
       {bcp && <BcpFeedPanel status={bcp} />}
+
+      {governance && (
+        <LenderGovernancePanel
+          data={governance}
+          onChange={() => getLenderGovernance().then(setGovernance).catch(() => undefined)}
+        />
+      )}
 
       {quality && <DataQualityPanel report={quality} onRefresh={() => getDataQuality().then(setQuality).catch(() => undefined)} />}
 

@@ -78,6 +78,68 @@ that lender's applications whose tier didn't come from a file; file-stated tiers
 touched. The SQL `lender` enum still defines which codes exist — adding a brand-new lender
 is a migration plus a `lenders` row.
 
+### Classification criteria
+
+"Prime" and "subprime" describe a lender's **program**, not the lender. What separates them:
+
+| | Prime program | Subprime / second-look program |
+|---|---|---|
+| Typical underwriting | conventional credit, thin-file declined | designed for thin or damaged credit |
+| Approval rate of decided applications | lower | higher |
+| Typical approved amount | larger limits | smaller limits |
+| Usual role in a round | applied first | applied after a prime decline |
+
+A lender's row in the `lenders` table records which programs it runs and
+`classification_source`: `unconfirmed` (our starting guess), `inferred_from_data`, or
+`lender_confirmed`. **Prefer the lender's own word.** Failing that,
+`GET /api/lenders/governance` reports, per lender, what the evidence says — how many rows
+each tier has been stated on, the approval rate of decided applications, and the typical
+approved amount — and phrases a `classificationHint` from it. It never reclassifies
+anything on its own, and a handful of contradicting rows is called out as rows to check
+rather than treated as a second program.
+
+The order of evidence: the export's own Program column beats observed behaviour, and
+behaviour is only read once there are at least 20 decided applications.
+
+## Statuses: what the coarse four hide
+
+`application_status` stays at submitted / pending / approved / declined because the Finance
+Report is built on it. But folding *withdrawn*, *expired* and *cancelled* into "submitted"
+loses the difference between **an application the lender hasn't answered** and **one that
+died** — both look undecided, only one is worth chasing.
+
+So every application also keeps `status_raw` (verbatim from the export), a normalised
+`status_detail`, and a derived `outcome_class`:
+
+| outcome_class | status_detail | Meaning |
+|---|---|---|
+| `open` | submitted, in_review, referred | still live, awaiting a decision |
+| `decided` | approved, conditionally_approved, prequalified, declined, pre_declined | the lender answered |
+| `abandoned` | withdrawn, cancelled, expired, incomplete | submitted, never decided, not coming back |
+
+Filter on either with `statusDetail=` or `outcomeClass=` on `/api/finance/summary`;
+`statusBreakdown` in the response gives the counts. Two data-quality checks use it:
+*applications withdrawn/expired/cancelled* (lost opportunities) and *applications still
+open after 60 days* (usually a decision that never made it into an export).
+
+Adding a spelling is one entry in `STATUS_WORDS` in `columns.ts`.
+
+## Export governance
+
+A feed that stops arriving looks exactly like a lender doing less business. So each lender
+carries an **owner** (who pulls the file), a **cadence** (weekly … quarterly, `on_request`,
+`none`, or `unset`) and a **grace period**; freshness is derived from the import batches,
+never stored, so it can't drift.
+
+`GET /api/lenders/governance` gives per lender: owner, cadence, last import and its file,
+days since, and a feed status — `ok`, `due`, `overdue`, `never`, or `no_schedule`. The
+*Lender feeds & classification* panel on the Import page edits all of it inline. Two
+data-quality checks cover the gaps: **exports overdue or never received**, and **lenders
+with no owner or cadence** — because a feed nobody owns can never be reported late.
+
+Set these with `PUT /api/lenders/:code` (`exportOwner`, `exportCadence`, `exportGraceDays`,
+`portalUrl`, `classificationSource`) or from the panel.
+
 ## Patient matching
 
 Lender exports identify people by name and date of birth. Matching ladder, first hit wins:
