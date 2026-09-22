@@ -3,9 +3,11 @@ import { Card, Text, Title, Grid } from "@tremor/react";
 import {
   getFinanceSummary,
   getFunnelSummary,
+  getLenders,
   getLocations,
   type FinanceSummary,
   type FunnelSummaryResponse,
+  type LenderOption,
   type LocationOption,
 } from "../lib/api";
 import { FilterBar, type Filters } from "../components/FilterBar";
@@ -28,12 +30,15 @@ function defaultFilters(): Filters {
 export function Dashboard() {
   const [filters, setFilters] = useState<Filters>(defaultFilters());
   const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [lenders, setLenders] = useState<LenderOption[]>([]);
   const [finance, setFinance] = useState<FinanceSummary | null>(null);
   const [funnel, setFunnel] = useState<FunnelSummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const unknownTierTotal = lenders.reduce((n, l) => n + (l.unknown_tier ?? 0), 0);
 
   useEffect(() => {
     getLocations().catch(() => undefined).then((locs) => locs && setLocations(locs));
+    getLenders().catch(() => undefined).then((ls) => ls && setLenders(ls));
   }, []);
 
   useEffect(() => {
@@ -62,7 +67,21 @@ export function Dashboard() {
     <main className="mx-auto max-w-6xl p-6">
       <Title className="mb-4 text-2xl">Finance Report</Title>
 
-      <FilterBar filters={filters} locations={locations} onChange={setFilters} />
+      <FilterBar filters={filters} locations={locations} lenders={lenders} onChange={setFilters} />
+
+      {(filters.applicationType === "primary" || filters.applicationType === "subprime") && unknownTierTotal > 0 && (
+        <Card className="mb-6 border-l-4 border-amber-400">
+          <Text className="text-sm text-amber-900">
+            {unknownTierTotal.toLocaleString()} application{unknownTierTotal === 1 ? "" : "s"} on file have an unknown tier and
+            are not counted under this filter (
+            {lenders
+              .filter((l) => (l.unknown_tier ?? 0) > 0)
+              .map((l) => `${l.label} ${l.unknown_tier}`)
+              .join(", ")}
+            ). Their lenders run both programs and the export didn't say which — choose "Unknown tier" to see them.
+          </Text>
+        </Card>
+      )}
 
       {error && (
         <Card className="mb-6 border-l-4 border-red-500">

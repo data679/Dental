@@ -27,7 +27,7 @@ below is an external dependency, an unverified assumption, or a decision — not
 |---|---|---|---|---|
 | B1 | **No real export from any lender yet** (CareCredit, Sunbit, Cherry, Alphaeon, Proceed, HFD, Fortiva, Access, Covered Care, Eve). Every header alias, status word and date/amount format in the importer is inferred, not observed. | The importer may map a real file wrongly or reject rows. It reports exactly how it read each header, so this is fast to fix — but only with a file in hand. | **One export from one lender** (even a month, even old). Then each further lender as they come. | Practice ops / finance |
 | B2 | **Patient identity is name + DOB.** Lender portals don't know PMS ids. Matching ladder is Denticon id → chart no → last name + DOB → name only. Real duplicate charts in Denticon return *ambiguous* by design; exports without a DOB column fall to name-only matching. | Some applications stay unlinked (still counted in the funnel, but not filterable by provider / new-patient). | Confirm which identifiers each portal exports; ask front desk to type the chart number into the lender application's reference field where the portal allows it. | Finance + front desk |
-| B3 | **Prime vs subprime is assumed per lender** (CareCredit/Alphaeon/Cherry/Proceed/Eve prime; HFD/Covered Care/Sunbit/Fortiva/Access subprime) from the storyboard's wording. | The "Prime vs SubPrime" filter may be miscategorised. | Someone who runs the applications confirms the list; or an export column that says so. | Finance |
+| B3 | **Which programs each lender runs is a starting guess.** Some lenders are prime-only, some subprime-only, some run both; the `lenders` table holds the current configuration (financing-intake.md § Tiers). For both-program lenders the export must carry a Program/Tier column or the tier is recorded as unknown. | Prime vs SubPrime filter is only as good as the configuration + the export's tier column. | Whoever runs the applications confirms the table (`PUT /api/lenders/:code`); check each lender's export for a tier column. | Finance |
 | B4 | **Multi-app grouping window is a guess (14 days).** Applications for the same patient within 14 days are treated as one case. A second treatment inside two weeks would be merged; a portal request id would avoid guessing but we don't know if any portal exports one. | Case counts (funnel financing stages) could be slightly over-merged. | Confirm from real files; window is one env variable (`FINANCING_CASE_WINDOW_DAYS`). | Finance |
 | B5 | **Soft vs hard pull relies on wording** ("Prequalified" / "Pre-approved" ⇒ soft) or an explicit column. | Soft/hard split may be blank for lenders that don't say. | Real files. | Finance |
 | B6 | **Funding data may live in a different export than applications.** Some portals report *transactions* (purchase date/amount) separately from *applications* (decision). We handle both in one file or via re-import, but haven't seen the real split. | "Funded" stage could lag or be missing for some lenders. | Real files; possibly two files per lender per period. | Finance |
@@ -45,7 +45,7 @@ below is an external dependency, an unverified assumption, or a decision — not
 
 **Internal decisions needed**
 1. ~~Definition of "new patient"~~ — decided (A5).
-2. Prime/subprime per lender (B3).
+2. Confirm which programs each lender runs — prime, subprime, or both (B3).
 3. Who owns lender exports and how often (B8).
 
 ## D. Once unblocked — cutover steps

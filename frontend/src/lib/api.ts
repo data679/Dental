@@ -48,7 +48,7 @@ export interface FinanceFilters {
   locationId?: number;
   dateFrom?: string;
   dateTo?: string;
-  applicationType?: ApplicationType;
+  applicationType?: ApplicationType | "unknown";
   status?: ApplicationStatus;
   newPatientsOnly?: boolean;
 }
@@ -97,6 +97,18 @@ export interface LocationOption {
   name: string;
 }
 
+/** Lender configuration from GET /api/lenders: label + which programs it runs. */
+export interface LenderOption {
+  code: Lender;
+  label: string;
+  offers_prime: boolean;
+  offers_subprime: boolean;
+  active: boolean;
+  applications?: number;
+  /** Applications on file whose tier is unknown (lender runs both programs, export didn't say). */
+  unknown_tier?: number;
+}
+
 /**
  * Backend-free demo mode (GitHub Pages): summaries are computed in the browser from
  * public/data/snapshot.json instead of fetched from /api. See staticApi.ts.
@@ -128,6 +140,13 @@ export async function getFinanceSummary(filters: FinanceFilters = {}): Promise<F
   const res = await fetch(`/api/finance/summary?${toQueryString(filters)}`);
   if (!res.ok) throw new Error(`Failed to load finance summary: ${res.status}`);
   return res.json();
+}
+
+export async function getLenders(): Promise<LenderOption[]> {
+  if (STATIC_MODE) return (await staticApi()).getLenders();
+  const res = await fetch("/api/lenders");
+  if (!res.ok) throw new Error(`Failed to load lenders: ${res.status}`);
+  return (await res.json()).lenders;
 }
 
 export async function getLocations(): Promise<LocationOption[]> {

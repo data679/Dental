@@ -1,6 +1,17 @@
 import { pool } from "../../db/pool.js";
 import { detectDelimiter, parseCsv } from "./csv.js";
-import { mapHeaders, normalizeRow, type ColumnMap, type NormalizedApplication, type RowError, type RowWarning } from "./columns.js";
+import {
+  DEFAULT_LENDER_TIERS,
+  describeTiers,
+  mapHeaders,
+  normalizeRow,
+  type ColumnMap,
+  type LenderTierConfig,
+  type NormalizedApplication,
+  type RowError,
+  type RowWarning,
+} from "./columns.js";
+import type { Lender } from "../../types/domain.js";
 import { matchPatient, resolveLocationId } from "./matching.js";
 import { env } from "../../config/env.js";
 import { nameKey } from "./columns.js";
@@ -60,6 +71,7 @@ export async function importFinancingCsv(input: ImportInput): Promise<ImportResu
     });
   }
 
+  const lenderTiers = await loadLenderTiers();
   const notes = fileNotes(map);
 
   const client = await pool.connect();
@@ -76,10 +88,11 @@ export async function importFinancingCsv(input: ImportInput): Promise<ImportResu
     const errors: RowError[] = [];
     const warnings: RowWarning[] = [];
     const seenKeys = new Map<string, number>(); // dedupe key → first row number in this file
+    const unknownTierByLender = new Map<Lender, number>();
 
     for (let i = 0; i < parsed.rows.length; i++) {
       const rowNumber = i + 1;
-      const result = normalizeRow(parsed.rows[i]!, parsed.headers, map, rowNumber);
+      const result = normalizeRow(parsed.rows[i]!, parsed.headers, map, rowNumber, { lenderTiers });
       const staged = await client.query<{ id: number }>(
         `INSERT INTO staging_financing_csv (raw, normalized, source_file, imported_by, batch_id, row_number)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
@@ -107,6 +120,9 @@ export async function importFinancingCsv(input: ImportInput): Promise<ImportResu
       }
       seenKeys.set(result.record.dedupeKey, rowNumber);
       warnings.push(...result.warnings);
+      if (result.record.applicationTypeSource === "unknown") {
+        unknownTierByLender.set(result.record.lender, (unknownTierByLender.get(result.record.lender) ?? 0) + 1);
+      }
 
       const outcome = await upsertApplication(client, result.record, stagingRowId);
       if (outcome.inserted) counts.inserted += 1;
@@ -118,6 +134,18 @@ export async function importFinancingCsv(input: ImportInput): Promise<ImportResu
       await client.query(
         "UPDATE staging_financing_csv SET processed_at = now(), outcome = $2, outcome_detail = $3 WHERE id = $1",
         [stagingRowId, outcome.inserted ? "inserted" : "updated", `${outcome.match.status}: ${outcome.match.detail}`],
+      );
+    }
+
+    // Lenders that run both programs need the export to say which — say so once per lender.
+    for (const [lender, n] of unknownTierByLender) {
+      const hasColumn = map.byColumn.application_type !== undefined;
+      notes.push(
+        `${n} ${lender} application${n === 1 ? "" : "s"} imported with tier unknown: ${lender} is configured as ${describeTiers(lenderTiers[lender])} and ` +
+          (hasColumn
+            ? "the tier column was blank or unrecognised on those rows (see the row warnings)."
+            : "the file has no prime/subprime column.") +
+          " They're excluded from the Prime vs SubPrime filter until a file states their tier.",
       );
     }
 
@@ -148,6 +176,16 @@ export async function importFinancingCsv(input: ImportInput): Promise<ImportResu
   }
 }
 
+/** Tier configuration from the `lenders` table, falling back to the built-in defaults. */
+export async function loadLenderTiers(): Promise<LenderTierConfig> {
+  const cfg: LenderTierConfig = { ...DEFAULT_LENDER_TIERS };
+  const { rows } = await pool.query<{ code: Lender; offers_prime: boolean; offers_subprime: boolean }>(
+    "SELECT code, offers_prime, offers_subprime FROM lenders",
+  );
+  for (const r of rows) cfg[r.code] = { prime: r.offers_prime, subprime: r.offers_subprime };
+  return cfg;
+}
+
 /** What the file can't tell us at all, said once rather than per row. */
 function fileNotes(map: ColumnMap): string[] {
   const has = (c: keyof ColumnMap["byColumn"]) => map.byColumn[c] !== undefined;
@@ -158,7 +196,7 @@ function fileNotes(map: ColumnMap): string[] {
   if (!has("approved_amount")) notes.push("No approved-amount column — utilisation % can't be computed.");
   if (!has("external_id")) notes.push("No application id column — re-imports are de-duplicated by lender + patient + date instead.");
   if (!has("location")) notes.push("No practice/location column — location comes from the matched patient only.");
-  if (!has("application_type")) notes.push("No prime/subprime column — tier defaulted per lender.");
+  if (!has("application_type")) notes.push("No prime/subprime column — tier taken from the lender configuration where the lender runs only one program.");
   return notes;
 }
 
@@ -175,11 +213,22 @@ async function upsertApplication(db: Db, rec: NormalizedApplication, stagingRowI
     `INSERT INTO financing_applications
        (patient_id, treatment_plan_id, lender, application_type, status, submitted_date, decision_date,
         approved_amount, requested_amount, decline_reason, location_id, external_id, dedupe_key,
-        match_status, match_detail, staging_row_id, inquiry_type)
-     VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        match_status, match_detail, staging_row_id, inquiry_type, application_type_source)
+     VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      ON CONFLICT (dedupe_key) DO UPDATE SET
        patient_id = COALESCE(EXCLUDED.patient_id, financing_applications.patient_id),
-       application_type = EXCLUDED.application_type,
+       -- Tier precedence: a value the export stated ('file') is never replaced by one we
+       -- derived (lender_only_tier) or by unknown; a derived value never replaces a
+       -- file-stated one; unknown never replaces anything.
+       application_type = CASE
+         WHEN EXCLUDED.application_type_source = 'file' THEN EXCLUDED.application_type
+         WHEN financing_applications.application_type_source = 'file' THEN financing_applications.application_type
+         ELSE COALESCE(EXCLUDED.application_type, financing_applications.application_type) END,
+       application_type_source = CASE
+         WHEN EXCLUDED.application_type_source = 'file' THEN 'file'
+         WHEN financing_applications.application_type_source = 'file' THEN 'file'
+         WHEN EXCLUDED.application_type IS NULL THEN COALESCE(financing_applications.application_type_source, 'unknown')
+         ELSE EXCLUDED.application_type_source END,
        status = EXCLUDED.status,
        submitted_date = COALESCE(EXCLUDED.submitted_date, financing_applications.submitted_date),
        decision_date = COALESCE(EXCLUDED.decision_date, financing_applications.decision_date),
@@ -193,7 +242,7 @@ async function upsertApplication(db: Db, rec: NormalizedApplication, stagingRowI
        inquiry_type = COALESCE(EXCLUDED.inquiry_type, financing_applications.inquiry_type),
        updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`,
-    [patientId, rec.lender, rec.applicationType, rec.status, rec.submittedDate, rec.decisionDate, rec.approvedAmount, rec.requestedAmount, rec.declineReason, locationId, rec.externalId, rec.dedupeKey, match.status, match.detail, stagingRowId, rec.inquiryType],
+    [patientId, rec.lender, rec.applicationType, rec.status, rec.submittedDate, rec.decisionDate, rec.approvedAmount, rec.requestedAmount, rec.declineReason, locationId, rec.externalId, rec.dedupeKey, match.status, match.detail, stagingRowId, rec.inquiryType, rec.applicationTypeSource],
   );
   const applicationId = Number(rows[0].id);
   const inserted = Boolean(rows[0].inserted);

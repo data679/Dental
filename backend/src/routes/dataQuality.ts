@@ -56,6 +56,14 @@ const CHECKS: Check[] = [
             FROM financing_applications WHERE case_id IS NULL`,
   },
   {
+    id: "applications_unknown_tier",
+    title: "Applications with unknown prime/subprime tier",
+    severity: "warning",
+    hint: "The lender runs both programs and the export didn't say which. Excluded from the Prime vs SubPrime filter. Re-import with a Program/Tier column, or if the lender really runs one program, fix it under lenders and run retier.",
+    sql: `SELECT '#' || id AS label, lender || ' · ' || coalesce(submitted_date::text, 'no date') || ' · ' || coalesce(external_id, '(no id)') AS detail
+            FROM financing_applications WHERE application_type IS NULL`,
+  },
+  {
     id: "duplicate_locations",
     title: "Locations with the same name",
     severity: "warning",

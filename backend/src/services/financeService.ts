@@ -99,7 +99,9 @@ async function applicationsByLender(range: Range, filters: FinanceFilters): Prom
     params.push(filters.locationId);
     clauses.push(`COALESCE(fa.location_id, p.location_id) = $${params.length}`);
   }
-  if (filters.applicationType !== undefined) {
+  if (filters.applicationType === "unknown") {
+    clauses.push("fa.application_type IS NULL");
+  } else if (filters.applicationType !== undefined) {
     params.push(filters.applicationType);
     clauses.push(`fa.application_type = $${params.length}`);
   }
@@ -134,7 +136,9 @@ async function approvalRateByLender(range: Range, filters: FinanceFilters): Prom
     params.push(filters.locationId);
     clauses.push(`COALESCE(fa.location_id, p.location_id) = $${params.length}`);
   }
-  if (filters.applicationType !== undefined) {
+  if (filters.applicationType === "unknown") {
+    clauses.push("fa.application_type IS NULL");
+  } else if (filters.applicationType !== undefined) {
     params.push(filters.applicationType);
     clauses.push(`fa.application_type = $${params.length}`);
   }

@@ -56,7 +56,8 @@ export interface FinancingApplication {
   patientId: number;
   treatmentPlanId: number | null;
   lender: Lender;
-  applicationType: ApplicationType;
+  /** null = unknown (lender runs both programs and the export didn't say). */
+  applicationType: ApplicationType | null;
   status: ApplicationStatus;
   submittedDate: string | null;
   decisionDate: string | null;
@@ -107,7 +108,7 @@ export interface FinanceFilters {
   locationId?: number; // "Practice Name"
   dateFrom?: string;
   dateTo?: string;
-  applicationType?: ApplicationType; // "Prime vs SubPrime"
+  applicationType?: ApplicationType | "unknown"; // "Prime vs SubPrime" (unknown = tier not stated for a both-program lender)
   status?: ApplicationStatus; // "Status Filter"
   newPatientsOnly?: boolean; // "Patient Type": All vs New Patients (first visit within the period)
 }

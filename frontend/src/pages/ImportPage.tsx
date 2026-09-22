@@ -15,6 +15,7 @@ import {
   STATIC_MODE,
 } from "../lib/api";
 import { DataQualityPanel } from "../components/DataQualityPanel";
+import { LENDER_LABELS } from "../lib/lenders";
 import { BcpFeedPanel } from "../components/BcpFeedPanel";
 
 // Manual intake for lender application exports. Upload → immediate per-row outcome →
@@ -23,18 +24,6 @@ import { BcpFeedPanel } from "../components/BcpFeedPanel";
 // and the result shows exactly which header became which column so a bad mapping is
 // visible on the spot.
 
-const LENDER_LABELS: Record<string, string> = {
-  hfd: "HFD",
-  alphaeon: "Alphaeon",
-  cherry: "Cherry",
-  care_credit: "CareCredit",
-  proceed: "Proceed",
-  covered_care: "Covered Care",
-  eve: "Eve",
-  sunbit: "Sunbit",
-  fortiva: "Fortiva",
-  access: "Access",
-};
 
 function fmtDate(value: string | null): string {
   if (!value) return "–";
@@ -312,7 +301,7 @@ export function ImportPage() {
                 {unmatched.map((u) => (
                   <tr key={u.id} className="border-t border-gray-100">
                     <td className="py-1 pr-4 whitespace-nowrap">{fmtDate(u.submitted_date)}</td>
-                    <td className="py-1 pr-4">{LENDER_LABELS[u.lender] ?? u.lender}</td>
+                    <td className="py-1 pr-4">{LENDER_LABELS[u.lender as keyof typeof LENDER_LABELS] ?? u.lender}</td>
                     <td className="py-1 pr-4 capitalize">{u.status}</td>
                     <td className="py-1 pr-4">{[u.first_name, u.last_name].filter(Boolean).join(" ") || "–"}</td>
                     <td className="py-1 pr-4">{fmtDate(u.dob)}</td>

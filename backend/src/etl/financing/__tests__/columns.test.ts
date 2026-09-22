@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_LENDER_TIERS,
   mapHeaders,
   normalizeAmount,
   normalizeDate,
@@ -80,14 +81,15 @@ describe("normalizeRow", () => {
   const row = (over: Partial<Record<(typeof headers)[number], string>>) =>
     headers.map((h) => over[h] ?? "");
 
-  it("builds a canonical record, defaulting the tier per lender", () => {
-    const r = normalizeRow(row({ "Application ID": "A1", Lender: "Sunbit", Status: "Approved", "Application Date": "8/3/2026", "Approved Amount": "$1,500", Practice: "Carson", "Last Name": "Chen", "First Name": "Avery", DOB: "1990-02-14" }), headers, map, 1);
+  it("builds a canonical record; a single-program lender gets its tier without a column", () => {
+    const r = normalizeRow(row({ "Application ID": "A1", Lender: "HFD", Status: "Approved", "Application Date": "8/3/2026", "Approved Amount": "$1,500", Practice: "Carson", "Last Name": "Chen", "First Name": "Avery", DOB: "1990-02-14" }), headers, map, 1);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.record).toMatchObject({
       externalId: "A1",
-      lender: "sunbit",
+      lender: "hfd",
       applicationType: "subprime",
+      applicationTypeSource: "lender_only_tier",
       status: "approved",
       submittedDate: "2026-08-03",
       decisionDate: "2026-08-03", // defaults to submitted date for decisioned rows
@@ -96,9 +98,28 @@ describe("normalizeRow", () => {
       location: "Carson",
       patientLastName: "Chen",
       patientDob: "1990-02-14",
-      dedupeKey: "sunbit:A1",
+      dedupeKey: "hfd:A1",
     });
-    expect(r.raw["Lender"]).toBe("Sunbit");
+    expect(r.raw["Lender"]).toBe("HFD");
+  });
+
+  it("tiers: file wins; both-program lenders are unknown without a column; contradictions warn", () => {
+    // Cherry runs both programs → silent file ⇒ unknown, not a guess
+    const both = normalizeRow(row({ Lender: "Cherry", Status: "Approved", "Last Name": "Doe", DOB: "1/1/1990" }), headers, map, 1);
+    expect(both.ok && both.record.applicationType).toBeNull();
+    expect(both.ok && both.record.applicationTypeSource).toBe("unknown");
+    // …and with a Program column it's known
+    const stated = normalizeRow(row({ Lender: "Cherry", Status: "Approved", "Last Name": "Doe", DOB: "1/1/1990", Type: "SubPrime" }), headers, map, 2);
+    expect(stated.ok && stated.record).toMatchObject({ applicationType: "subprime", applicationTypeSource: "file" });
+    // CareCredit is prime-only: a file saying subprime is kept but flagged
+    const contra = normalizeRow(row({ Lender: "CareCredit", Status: "Approved", "Last Name": "Doe", DOB: "1/1/1990", Type: "SubPrime" }), headers, map, 3);
+    expect(contra.ok && contra.record.applicationType).toBe("subprime");
+    expect(contra.warnings.map((w) => w.message)).toContainEqual(expect.stringMatching(/configured as prime only/));
+    // configuration is injectable (what the lenders table provides at import time)
+    const custom = normalizeRow(row({ Lender: "Cherry", Status: "Approved", "Last Name": "Doe", DOB: "1/1/1990" }), headers, map, 4, {
+      lenderTiers: { ...DEFAULT_LENDER_TIERS, cherry: { prime: true, subprime: false } },
+    });
+    expect(custom.ok && custom.record).toMatchObject({ applicationType: "primary", applicationTypeSource: "lender_only_tier" });
   });
 
   it("derives funding from a funded date/amount even when status just says approved", () => {
@@ -110,7 +131,7 @@ describe("normalizeRow", () => {
   });
 
   it("honours an explicit type column and rejects unusable rows with a reason", () => {
-    const typed = normalizeRow(row({ Lender: "CareCredit", Status: "Declined", "Last Name": "Doe", Type: "SubPrime" }), headers, map, 3);
+    const typed = normalizeRow(row({ Lender: "Cherry", Status: "Declined", "Last Name": "Doe", Type: "SubPrime" }), headers, map, 3);
     expect(typed.ok && typed.record.applicationType).toBe("subprime");
 
     const noLender = normalizeRow(row({ Lender: "Mystery Bank", Status: "Approved", "Last Name": "Doe" }), headers, map, 4);
@@ -156,10 +177,12 @@ describe("edge cases", () => {
     expect(run({ ...base, "Approved Amount": "$9,999,999.99" }).ok).toBe(true);
   });
 
-  it("defaults an unknown tier with a warning instead of rejecting the row", () => {
+  it("treats an unrecognised tier value as not stated, with a warning, instead of rejecting the row", () => {
     const r = run({ ...base, Type: "Standard" });
-    expect(r.ok && r.record.applicationType).toBe("primary");
-    expect(r.warnings[0]!.message).toMatch(/unknown application type "Standard" — defaulted to primary/);
+    expect(r.ok && r.record.applicationType).toBeNull(); // Cherry runs both programs
+    expect(r.warnings[0]!.message).toMatch(/unknown application type "Standard" — treated as not stated/);
+    const hfd = run({ ...base, Lender: "HFD", Type: "Standard" });
+    expect(hfd.ok && hfd.record.applicationType).toBe("subprime");
   });
 
   it("drops an impossible DOB from matching but keeps the row", () => {

@@ -1,38 +1,40 @@
-import type { ApplicationStatus, ApplicationType, Lender, LocationOption } from "../lib/api";
+import type { ApplicationStatus, ApplicationType, Lender, LenderOption, LocationOption } from "../lib/api";
+import { LENDER_LABELS } from "../lib/lenders";
 
 export interface Filters {
   locationId?: number;
   dateFrom: string;
   dateTo: string;
-  applicationType?: ApplicationType;
+  applicationType?: ApplicationType | "unknown";
   status?: ApplicationStatus;
   lender?: Lender;
   newPatientsOnly: boolean;
 }
 
-const LENDERS: Array<{ value: Lender; label: string }> = [
-  { value: "care_credit", label: "CareCredit" },
-  { value: "alphaeon", label: "Alphaeon" },
-  { value: "cherry", label: "Cherry" },
-  { value: "proceed", label: "Proceed" },
-  { value: "sunbit", label: "Sunbit" },
-  { value: "hfd", label: "HFD" },
-  { value: "covered_care", label: "Covered Care" },
-  { value: "eve", label: "Eve" },
-  { value: "fortiva", label: "Fortiva" },
-  { value: "access", label: "Access" },
-];
+// Used until GET /api/lenders answers (or if it can't).
+const FALLBACK_LENDERS: LenderOption[] = (Object.keys(LENDER_LABELS) as Lender[]).map((code) => ({
+  code, label: LENDER_LABELS[code], offers_prime: true, offers_subprime: true, active: true,
+}));
+
+function tierTag(l: LenderOption): string {
+  if (l.offers_prime && l.offers_subprime) return "prime + subprime";
+  if (l.offers_prime) return "prime";
+  if (l.offers_subprime) return "subprime";
+  return "no programs configured";
+}
 
 interface FilterBarProps {
   filters: Filters;
   locations: LocationOption[];
+  lenders?: LenderOption[];
   onChange: (next: Filters) => void;
 }
 
 const selectClass =
   "rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-700 focus:border-blue-500 focus:outline-none";
 
-export function FilterBar({ filters, locations, onChange }: FilterBarProps) {
+export function FilterBar({ filters, locations, lenders, onChange }: FilterBarProps) {
+  const lenderOptions = (lenders?.length ? lenders : FALLBACK_LENDERS).filter((l) => l.active);
   return (
     <div className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4 sm:grid-cols-3 lg:grid-cols-6">
       <div>
@@ -73,20 +75,26 @@ export function FilterBar({ filters, locations, onChange }: FilterBarProps) {
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-gray-500">Prime vs SubPrime</label>
+        <label
+          className="mb-1 block text-xs font-medium text-gray-500"
+          title="Tier of each application. Lenders that run both programs need the export to say which; applications whose tier is unknown are left out when this filter is set."
+        >
+          Prime vs SubPrime
+        </label>
         <select
           className={`${selectClass} w-full`}
           value={filters.applicationType ?? ""}
           onChange={(e) =>
             onChange({
               ...filters,
-              applicationType: (e.target.value || undefined) as ApplicationType | undefined,
+              applicationType: (e.target.value || undefined) as ApplicationType | "unknown" | undefined,
             })
           }
         >
           <option value="">All</option>
           <option value="primary">Prime</option>
           <option value="subprime">SubPrime</option>
+          <option value="unknown">Unknown tier</option>
         </select>
       </div>
 
@@ -115,9 +123,9 @@ export function FilterBar({ filters, locations, onChange }: FilterBarProps) {
           onChange={(e) => onChange({ ...filters, lender: (e.target.value || undefined) as Lender | undefined })}
         >
           <option value="">All</option>
-          {LENDERS.map((l) => (
-            <option key={l.value} value={l.value}>
-              {l.label}
+          {lenderOptions.map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.label} · {tierTag(l)}
             </option>
           ))}
         </select>

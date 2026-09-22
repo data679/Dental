@@ -372,6 +372,118 @@ d("multi-lender cases (database)", () => {
   });
 });
 
+d("lender tiers (database)", () => {
+  let getFinanceSummary: typeof import("../../../services/financeService.js").getFinanceSummary;
+  beforeAll(async () => {
+    ({ getFinanceSummary } = await import("../../../services/financeService.js"));
+  });
+  beforeEach(async () => {
+    await pool.query(`TRUNCATE fundings, financing_applications, financing_cases, staging_financing_csv, financing_import_batches RESTART IDENTITY CASCADE`);
+    await pool.query("UPDATE lenders SET offers_prime = true, offers_subprime = true WHERE code = 'cherry'");
+  });
+
+  it("an 'Unknown tier' filter shows exactly the rows the Prime/SubPrime filter drops", async () => {
+    await importFinancingCsv({
+      csvText: csv("Application ID,Lender,Status,Application Date,Last Name,DOB", "C1,Cherry,Approved,9/1/2026,Doe,4/12/1985\nK1,CareCredit,Approved,9/1/2026,Doe,4/12/1985"),
+      sourceFile: "u.csv",
+    });
+    const unknown = await getFinanceSummary({ dateFrom: "2026-09-01", dateTo: "2026-09-30", applicationType: "unknown" });
+    expect(unknown.applicationsByLender).toEqual([{ lender: "cherry", count: 1 }]);
+    const prime = await getFinanceSummary({ dateFrom: "2026-09-01", dateTo: "2026-09-30", applicationType: "primary" });
+    expect(prime.applicationsByLender).toEqual([{ lender: "care_credit", count: 1 }]);
+  });
+
+  it("imports both-program lenders with tier unknown when the file is silent, notes it once, and excludes them from the tier filter", async () => {
+    const r = await importFinancingCsv({
+      csvText: csv(
+        "Application ID,Lender,Status,Application Date,Last Name,DOB",
+        "C1,Cherry,Approved,9/1/2026,Doe,4/12/1985",
+        "C2,Cherry,Declined,9/2/2026,Doe,4/12/1985",
+        "H1,HFD,Approved,9/3/2026,Doe,4/12/1985",
+        "K1,CareCredit,Approved,9/4/2026,Doe,4/12/1985",
+      ),
+      sourceFile: "tiers.csv",
+    });
+    expect(r.notes).toContainEqual(expect.stringMatching(/2 cherry applications imported with tier unknown.*file has no prime\/subprime column/));
+
+    const { rows } = await pool.query("SELECT external_id, application_type, application_type_source FROM financing_applications ORDER BY external_id");
+    expect(rows).toEqual([
+      { external_id: "C1", application_type: null, application_type_source: "unknown" },
+      { external_id: "C2", application_type: null, application_type_source: "unknown" },
+      { external_id: "H1", application_type: "subprime", application_type_source: "lender_only_tier" },
+      { external_id: "K1", application_type: "primary", application_type_source: "lender_only_tier" },
+    ]);
+    const prime = await getFinanceSummary({ dateFrom: "2026-09-01", dateTo: "2026-09-30", applicationType: "primary" });
+    expect(prime.applicationsByLender).toEqual([{ lender: "care_credit", count: 1 }]);
+    const all = await getFinanceSummary({ dateFrom: "2026-09-01", dateTo: "2026-09-30" });
+    expect(all.applicationsByLender.map((x) => x.count).reduce((a, b) => a + b, 0)).toBe(4);
+    // with a tier column whose cells are blank, the note blames the cells, not a missing column
+    const r2 = await importFinancingCsv({
+      csvText: csv("Application ID,Lender,Status,Application Date,Program,Last Name,DOB", "C9,Cherry,Approved,9/9/2026,,Doe,4/12/1985"),
+      sourceFile: "blank.csv",
+    });
+    expect(r2.notes).toContainEqual(expect.stringMatching(/1 cherry application imported with tier unknown.*blank or unrecognised/));
+  });
+
+  it("a later file that states the tier fills it in; a later silent file never clears it", async () => {
+    await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Last Name,DOB", "C1,Cherry,Approved,9/1/2026,Doe,4/12/1985"), sourceFile: "a.csv" });
+    await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Program,Last Name,DOB", "C1,Cherry,Approved,9/1/2026,Second Look,Doe,4/12/1985"), sourceFile: "b.csv" });
+    let { rows } = await pool.query("SELECT application_type, application_type_source FROM financing_applications");
+    expect(rows[0]).toEqual({ application_type: "subprime", application_type_source: "file" });
+    await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Last Name,DOB", "C1,Cherry,Funded,9/1/2026,Doe,4/12/1985"), sourceFile: "c.csv" });
+    ({ rows } = await pool.query("SELECT status, application_type, application_type_source FROM financing_applications"));
+    expect(rows[0]).toEqual({ status: "approved", application_type: "subprime", application_type_source: "file" });
+  });
+
+  it("a file-stated tier survives a silent re-import even for a single-program lender (source stays 'file')", async () => {
+    // CareCredit is prime-only; the file said SubPrime. A later silent export must not
+    // 'correct' it, and must not downgrade the source (which would let retier clear it).
+    await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Program,Last Name,DOB", "K1,CareCredit,Approved,9/1/2026,SubPrime,Doe,4/12/1985\nH1,HFD,Approved,9/1/2026,Second Look,Doe,4/12/1985"), sourceFile: "a.csv" });
+    await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Last Name,DOB", "K1,CareCredit,Funded,9/1/2026,Doe,4/12/1985\nH1,HFD,Funded,9/1/2026,Doe,4/12/1985"), sourceFile: "b.csv" });
+    const { rows } = await pool.query("SELECT external_id, status, application_type, application_type_source FROM financing_applications ORDER BY external_id");
+    expect(rows).toEqual([
+      { external_id: "H1", status: "approved", application_type: "subprime", application_type_source: "file" },
+      { external_id: "K1", status: "approved", application_type: "subprime", application_type_source: "file" },
+    ]);
+    // A re-import whose tier cell is unrecognised is 'not stated', so it can't clobber either.
+    await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Program,Last Name,DOB", "K1,CareCredit,Approved,9/1/2026,Standard,Doe,4/12/1985"), sourceFile: "c.csv" });
+    const { rows: k } = await pool.query("SELECT application_type, application_type_source FROM financing_applications WHERE external_id = 'K1'");
+    expect(k[0]).toEqual({ application_type: "subprime", application_type_source: "file" });
+  });
+
+  it("a derived tier is refreshed by a later derivation but never by unknown", async () => {
+    await pool.query("UPDATE lenders SET offers_prime = true, offers_subprime = false WHERE code = 'cherry'");
+    await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Last Name,DOB", "C1,Cherry,Approved,9/1/2026,Doe,4/12/1985"), sourceFile: "a.csv" });
+    await pool.query("UPDATE lenders SET offers_prime = true, offers_subprime = true WHERE code = 'cherry'");
+    // silent re-import while Cherry is 'both' → unknown must not erase the earlier derivation
+    await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Last Name,DOB", "C1,Cherry,Approved,9/1/2026,Doe,4/12/1985"), sourceFile: "b.csv" });
+    const { rows } = await pool.query("SELECT application_type, application_type_source FROM financing_applications");
+    expect(rows[0]).toEqual({ application_type: "primary", application_type_source: "lender_only_tier" });
+  });
+
+  it("lender config API: unknown code is 404, a lender can never end up with no programs", async () => {
+    const { retierLender } = await import("../../../services/lenderService.js");
+    expect(await retierLender("not_a_lender")).toBeNull();
+    expect(await retierLender("hfd' OR '1'='1")).toBeNull();
+    await expect(pool.query("UPDATE lenders SET offers_prime = false, offers_subprime = false WHERE code = 'hfd'")).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("the lenders table drives the importer; retier re-derives non-file tiers after a config change", async () => {
+    await pool.query("UPDATE lenders SET offers_prime = true, offers_subprime = false WHERE code = 'cherry'");
+    const r = await importFinancingCsv({ csvText: csv("Application ID,Lender,Status,Application Date,Last Name,DOB", "C1,Cherry,Approved,9/1/2026,Doe,4/12/1985"), sourceFile: "d.csv" });
+    expect(r.notes.some((n) => /tier unknown/.test(n))).toBe(false);
+    let { rows } = await pool.query("SELECT application_type, application_type_source FROM financing_applications");
+    expect(rows[0]).toEqual({ application_type: "primary", application_type_source: "lender_only_tier" });
+
+    // Config flips back to both → retier turns lender-derived tiers into unknown, leaves file-stated ones alone.
+    await pool.query("UPDATE lenders SET offers_prime = true, offers_subprime = true WHERE code = 'cherry'");
+    const { retierLender } = await import("../../../services/lenderService.js");
+    expect(await retierLender("cherry")).toEqual({ updated: 1, tier: "unknown" });
+    ({ rows } = await pool.query("SELECT application_type, application_type_source FROM financing_applications"));
+    expect(rows[0]).toEqual({ application_type: null, application_type_source: "unknown" });
+  });
+});
+
 d("new-patient definition (database)", () => {
   let getFinanceSummary: typeof import("../../../services/financeService.js").getFinanceSummary;
   beforeAll(async () => {

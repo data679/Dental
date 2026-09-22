@@ -26,7 +26,7 @@ score, with down payment).
 - **Patient** — id, location_id, provider_id, source (marketing channel), new_patient_flag,
   first_visit_date, created_at
 - **Treatment plan** — id, patient_id, procedure_code, proposed_fee, status, presented_date
-- **Financing application** — id, patient_id, treatment_plan_id, lender, application_type
+- **Financing application** — id, patient_id, treatment_plan_id, lender, application_type (primary | subprime | unknown when the lender runs both programs and the export did not say)
   (primary | subprime), status, submitted_date, decision_date, approved_amount,
   decline_reason
 - **Financing case** — id, patient_id, case_key, external_case_id (portal request id),

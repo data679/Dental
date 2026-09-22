@@ -147,24 +147,62 @@ export function normalizeLender(raw: string | undefined): Lender | null {
   return null;
 }
 
+/** Which programs a lender runs. Loaded from the `lenders` table at import time; this is the fallback. */
+export interface LenderTiers {
+  prime: boolean;
+  subprime: boolean;
+}
+export type LenderTierConfig = Record<Lender, LenderTiers>;
+
 /**
- * Default tier per lender when the export has no type column. Prime = traditional credit
- * (CareCredit, Alphaeon, Cherry, Proceed, Eve); subprime = near-prime/second-look
- * programs (HFD, Covered Care, Sunbit, Fortiva, Access). Assumption from the storyboard's
- * "primary or subprime lender" wording — override per file with an application_type column.
+ * Fallback configuration (mirrors migration 0010's seed rows). Some lenders are prime-only,
+ * some subprime-only, some run both — for "both" lenders the tier must come from the
+ * export, otherwise it is unknown. Confirm with whoever runs the applications.
  */
-export const DEFAULT_APPLICATION_TYPE: Record<Lender, ApplicationType> = {
-  care_credit: "primary",
-  alphaeon: "primary",
-  cherry: "primary",
-  proceed: "primary",
-  eve: "primary",
-  hfd: "subprime",
-  covered_care: "subprime",
-  sunbit: "subprime",
-  fortiva: "subprime",
-  access: "subprime",
+export const DEFAULT_LENDER_TIERS: LenderTierConfig = {
+  care_credit: { prime: true, subprime: false },
+  alphaeon: { prime: true, subprime: false },
+  cherry: { prime: true, subprime: true },
+  proceed: { prime: true, subprime: true },
+  sunbit: { prime: true, subprime: true },
+  hfd: { prime: false, subprime: true },
+  covered_care: { prime: false, subprime: true },
+  fortiva: { prime: false, subprime: true },
+  access: { prime: true, subprime: true },
+  eve: { prime: true, subprime: true },
 };
+
+export type ApplicationTypeSource = "file" | "lender_only_tier" | "unknown";
+
+/**
+ * Resolves an application's tier from what the export says and what the lender offers.
+ *  - export names a tier → use it (warn if the lender supposedly doesn't offer it)
+ *  - export silent, lender offers exactly one tier → that tier
+ *  - export silent, lender offers both → unknown (flagged; excluded from the Prime/SubPrime filter)
+ */
+export function resolveApplicationType(
+  lender: Lender,
+  fromFile: ApplicationType | null,
+  tiers: LenderTierConfig,
+): { applicationType: ApplicationType | null; source: ApplicationTypeSource; warning?: string } {
+  const offers = tiers[lender] ?? { prime: true, subprime: true };
+  if (fromFile) {
+    const offered = fromFile === "primary" ? offers.prime : offers.subprime;
+    return {
+      applicationType: fromFile,
+      source: "file",
+      warning: offered ? undefined : `export says ${fromFile === "primary" ? "prime" : "subprime"} but ${lender} is configured as ${describeTiers(offers)} — kept as in the file; check the lender configuration`,
+    };
+  }
+  if (offers.prime !== offers.subprime) {
+    return { applicationType: offers.prime ? "primary" : "subprime", source: "lender_only_tier" };
+  }
+  return { applicationType: null, source: "unknown" };
+}
+
+export function describeTiers(t: LenderTiers): string {
+  return t.prime && t.subprime ? "prime + subprime" : t.prime ? "prime only" : t.subprime ? "subprime only" : "no tiers";
+}
 
 export function normalizeApplicationType(raw: string | undefined): ApplicationType | null {
   const v = (raw ?? "").trim().toLowerCase().replace(/[^a-z]/g, "");
@@ -276,7 +314,9 @@ export function normalizeText(raw: string | undefined): string | null {
 export interface NormalizedApplication {
   externalId: string | null;
   lender: Lender;
-  applicationType: ApplicationType;
+  /** null = unknown: the lender offers both tiers and the export didn't say. */
+  applicationType: ApplicationType | null;
+  applicationTypeSource: ApplicationTypeSource;
   status: ApplicationStatus;
   submittedDate: string | null;
   decisionDate: string | null;
@@ -316,7 +356,7 @@ export function normalizeRow(
   headers: string[],
   map: ColumnMap,
   rowNumber: number,
-  opts: { today?: string } = {},
+  opts: { today?: string; lenderTiers?: LenderTierConfig } = {},
 ): NormalizeResult {
   const uniqueHeaders = dedupeHeaders(headers);
   const get = (col: CanonicalColumn) => {
@@ -373,11 +413,13 @@ export function normalizeRow(
   if (!inquiryType && status.impliesSoft) inquiryType = "soft";
 
   const typeRaw = get("application_type")?.trim();
-  let applicationType = normalizeApplicationType(typeRaw);
-  if (!applicationType) {
-    applicationType = DEFAULT_APPLICATION_TYPE[lender];
-    if (typeRaw) warn(`unknown application type "${typeRaw}" — defaulted to ${applicationType} for ${lender}`);
-  }
+  const typeFromFile = normalizeApplicationType(typeRaw);
+  if (typeRaw && !typeFromFile) warn(`unknown application type "${typeRaw}" — treated as not stated`);
+  const tier = resolveApplicationType(lender, typeFromFile, opts.lenderTiers ?? DEFAULT_LENDER_TIERS);
+  if (tier.warning) warn(tier.warning);
+  // A silent export for a both-tier lender is reported once per file (importService notes)
+  // rather than per row; the row still imports with tier unknown.
+  const applicationType = tier.applicationType;
 
   const fundedAmount = amounts.fundedAmount;
   const fundedDate = dates.fundedDate;
@@ -431,6 +473,7 @@ export function normalizeRow(
     externalId,
     lender,
     applicationType,
+    applicationTypeSource: tier.source,
     status: finalStatus,
     submittedDate: dates.submittedDate,
     decisionDate: dates.decisionDate ?? (finalStatus === "approved" || finalStatus === "declined" ? dates.submittedDate : null),

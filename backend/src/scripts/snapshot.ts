@@ -40,6 +40,12 @@ const snapshot = {
   generatedAt: new Date().toISOString(),
   note: "Synthetic demo data (mock Denticon practice + generated lender export). No real patients.",
   locations: await q<{ id: number; name: string }>("SELECT id::int, name FROM locations ORDER BY name"),
+  lenders: await q(
+    `SELECT code, label, offers_prime, offers_subprime, active,
+            (SELECT count(*)::int FROM financing_applications fa WHERE fa.lender = l.code) AS applications,
+            (SELECT count(*)::int FROM financing_applications fa WHERE fa.lender = l.code AND fa.application_type IS NULL) AS unknown_tier
+       FROM lenders l ORDER BY sort_order, code`,
+  ),
   providers: await q("SELECT id::int, location_id::int, name FROM providers ORDER BY name"),
   patients: await q(
     `SELECT id::int, location_id::int, provider_id::int, first_visit_date::text, new_patient_flag,

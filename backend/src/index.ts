@@ -7,6 +7,7 @@ import { financeImportRouter } from "./routes/financeImport.js";
 import { locationsRouter } from "./routes/locations.js";
 import { denticonRouter } from "./routes/denticon.js";
 import { dataQualityRouter } from "./routes/dataQuality.js";
+import { lendersRouter } from "./routes/lenders.js";
 import { bcpRouter } from "./routes/bcp.js";
 
 const app = express();
@@ -22,6 +23,7 @@ app.use("/api/finance", financeRouter);
 app.use("/api/locations", locationsRouter);
 app.use("/api/denticon", denticonRouter);
 app.use("/api/data-quality", dataQualityRouter);
+app.use("/api/lenders", lendersRouter);
 app.use("/api/bcp", bcpRouter);
 
 // Centralized error handler — never leak stack traces/internals to the client.

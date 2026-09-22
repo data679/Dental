@@ -32,7 +32,7 @@ Add a new lender's spellings there when its export shows up.
 |---|---|
 | `external_id` | idempotent re-import key; lender's application/reference number |
 | `lender` | CareCredit, Alphaeon, Cherry, Proceed, Sunbit, HFD, Covered Care, Eve, Fortiva, Access (many spellings accepted) |
-| `application_type` | prime / subprime. Defaults per lender when absent (prime: CareCredit, Alphaeon, Cherry, Proceed, Eve; subprime: HFD, Covered Care, Sunbit, Fortiva, Access — an assumption, override per file) |
+| `application_type` | prime / subprime (aliases: Program, Tier, Product Type…). See **Tiers** below — some lenders run only one program, some both. |
 | `status` | approved · declined · pending · submitted. "Funded"/"Used" ⇒ approved + a funding record; "Withdrawn"/"Expired"/"Cancelled" ⇒ submitted (top of funnel only) |
 | `submitted_date`, `decision_date` | ISO or US formats. Decision date defaults to submitted date for decisioned rows |
 | `requested_amount`, `approved_amount` | currency strings accepted (`$1,234.50`) |
@@ -40,6 +40,43 @@ Add a new lender's spellings there when its export shows up.
 | `funded_date`, `funded_amount` | either one ⇒ funding record; amount defaults to approved amount; utilization % = funded / approved |
 | `location` | practice/office name → `locations` (exact, else unique substring match) |
 | `patient_id` / `chart_no` / `patient_first_name` / `patient_last_name` / `patient_dob` | patient matching (below) |
+
+## Tiers: prime, subprime, or both
+
+Lenders differ: some are prime-only (a traditional credit card program), some are
+subprime-only (second-look / in-house programs), and some run **both** — for those, the
+same lender can approve one patient under prime and another under a second-look program.
+So a fixed tier per lender is wrong. The rule, per application:
+
+1. If the export states the tier (a Program / Tier / Product column), that's the tier
+   (`application_type_source = 'file'`). If it contradicts the lender configuration
+   (a "subprime" row for a prime-only lender) the row is kept as stated and flagged.
+2. Else, if the lender runs exactly one program, that program (`lender_only_tier`).
+3. Else the tier is **unknown** (`NULL`, `source = 'unknown'`): the row imports and
+   counts everywhere except under the Prime vs SubPrime filter; the import result says
+   once, per lender, how many rows this affected; the data-quality report lists them.
+
+A later file that states the tier fills it in; a later silent file never clears it.
+
+The configuration lives in the `lenders` table (`GET /api/lenders`, `PUT /api/lenders/:code`)
+with these starting values — **to be confirmed by whoever runs the applications**:
+
+| Lender | Programs | Starting value based on |
+|---|---|---|
+| CareCredit | prime | Synchrony card program |
+| Alphaeon | prime | Comenity card program |
+| Cherry | prime + subprime | multiple lending partners |
+| Proceed | prime + subprime | broad-approval positioning |
+| Sunbit | prime + subprime | near-prime focus, but both |
+| HFD | subprime | in-house / no-credit-check style |
+| Covered Care | subprime | second-look |
+| Fortiva | subprime | second-look |
+| Access, Eve | prime + subprime | unknown — set to both so nothing is guessed |
+
+After changing a lender's programs, `POST /api/lenders/:code/retier` re-derives the tier of
+that lender's applications whose tier didn't come from a file; file-stated tiers are never
+touched. The SQL `lender` enum still defines which codes exist — adding a brand-new lender
+is a migration plus a `lenders` row.
 
 ## Patient matching
 
@@ -71,7 +108,7 @@ Every row ends up in exactly one bucket, and the import result / history says wh
 On top of that, a row can carry **warnings** — it was imported, but something looks off:
 contradictory status (declined but a funded amount ⇒ treated as funded), decision or
 funded date before the submitted date, dates in the future, funded > approved, unknown
-prime/subprime value (defaulted for the lender), impossible DOB (ignored for matching),
+prime/subprime value (treated as not stated — may leave the tier unknown), impossible DOB (ignored for matching),
 day-first dates that were auto-detected (31/12/2025), a blank submitted date (another date
 is used, or the row is flagged as invisible to date filters), and **possible duplicates
 across files** — same patient, lender and submitted date under a different reference id
@@ -161,7 +198,7 @@ sync to see the complete funnel.
 ## Next steps
 
 - Real lender file: paste its headers into `HEADER_ALIASES` if anything shows as
-  *ignored* in the import result, and confirm the prime/subprime default per lender.
+  *ignored* in the import result, and confirm which programs each lender runs (`lenders` table, § Tiers).
 - Auth: the import endpoints write data and are unauthenticated until Auth0 is wired in.
 - Lender APIs (CareCredit/Sunbit have partner APIs) can feed `NormalizedApplication`
   records straight into `upsertApplication` — the CSV layer is just one producer.

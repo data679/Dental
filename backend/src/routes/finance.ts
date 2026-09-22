@@ -8,7 +8,7 @@ const filtersSchema = z.object({
   locationId: z.coerce.number().optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
-  applicationType: z.enum(["primary", "subprime"]).optional(),
+  applicationType: z.enum(["primary", "subprime", "unknown"]).optional(), // unknown = lender runs both, export didn't say
   status: z.enum(["submitted", "pending", "approved", "declined"]).optional(),
   newPatientsOnly: z.coerce.boolean().optional(),
 });

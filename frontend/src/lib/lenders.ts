@@ -16,11 +16,12 @@ export const LENDER_COLORS: Record<Lender, string> = {
   eve: "#eb6834",
 };
 
+// Fallback labels; the live list (and which tiers each lender runs) comes from GET /api/lenders.
 export const LENDER_LABELS: Record<Lender, string> = {
   hfd: "HFD",
   alphaeon: "Alphaeon",
   cherry: "Cherry",
-  care_credit: "Care Credit",
+  care_credit: "CareCredit",
   proceed: "Proceed",
   covered_care: "Covered Care",
   eve: "Eve",

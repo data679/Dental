@@ -6,6 +6,7 @@ import type {
   FunnelSummaryResponse,
   ImportBatch,
   Lender,
+  LenderOption,
   LocationOption,
   MultiLenderSummary,
   UnmatchedApplication,
@@ -20,6 +21,7 @@ interface Snapshot {
   generatedAt: string;
   note: string;
   locations: LocationOption[];
+  lenders?: LenderOption[];
   patients: Array<{ id: number; location_id: number | null; provider_id: number | null; first_visit_date: string | null; new_patient_flag: boolean; has_application: boolean }>;
   treatmentPlans: Array<{ id: number; patient_id: number; presented_date: string | null }>;
   treatmentCompletions: Array<{ treatment_plan_id: number; patient_id: number; completed_date: string | null }>;
@@ -29,7 +31,7 @@ interface Snapshot {
     chosen_lender: Lender | null; lender_list: Lender[] | null; approved_lenders: Lender[] | null; patient_first_visit_date: string | null;
   }>;
   applications: Array<{
-    id: number; case_id: number | null; lender: Lender; application_type: "primary" | "subprime"; status: string;
+    id: number; case_id: number | null; lender: Lender; application_type: "primary" | "subprime" | null; status: string;
     submitted_date: string | null; decision_date: string | null; approved_amount: number | null; location_id: number | null;
     patient_id: number | null; inquiry_type: "soft" | "hard" | null; patient_first_visit_date: string | null;
   }>;
@@ -38,6 +40,11 @@ interface Snapshot {
   unmatched: UnmatchedApplication[];
   dataQuality: DataQualityReport | null;
 }
+
+const FALLBACK_LENDER_LABELS: Record<Lender, string> = {
+  care_credit: "CareCredit", alphaeon: "Alphaeon", cherry: "Cherry", proceed: "Proceed", sunbit: "Sunbit",
+  hfd: "HFD", covered_care: "Covered Care", fortiva: "Fortiva", access: "Access", eve: "Eve",
+};
 
 let cache: Promise<Snapshot> | null = null;
 export function loadSnapshot(): Promise<Snapshot> {
@@ -60,6 +67,10 @@ const patientById = (s: Snapshot) => new Map(s.patients.map((p) => [p.id, p]));
 
 export async function getLocations(): Promise<LocationOption[]> {
   return (await loadSnapshot()).locations;
+}
+export async function getLenders(): Promise<LenderOption[]> {
+  const s = await loadSnapshot();
+  return s.lenders ?? Object.entries(FALLBACK_LENDER_LABELS).map(([code, label]) => ({ code: code as Lender, label, offers_prime: true, offers_subprime: true, active: true }));
 }
 
 export async function getFunnelSummary(f: FunnelFilters = {}): Promise<FunnelSummaryResponse> {
@@ -143,7 +154,7 @@ export async function getFinanceSummary(f: FinanceFilters = {}): Promise<Finance
 
   const appOk = (a: Snapshot["applications"][number]) =>
     (f.locationId === undefined || a.location_id === f.locationId) &&
-    (f.applicationType === undefined || a.application_type === f.applicationType) &&
+    (f.applicationType === undefined || (f.applicationType === "unknown" ? a.application_type === null : a.application_type === f.applicationType)) &&
     (!f.newPatientsOnly || newInPeriod(a.patient_first_visit_date));
 
   const byLender = new Map<Lender, number>();
